@@ -9,6 +9,4 @@ require (
 	golang.org/x/crypto v0.18.0
 )
 
-require (
-	github.com/jmespath/go-jmespath v0.4.0 // indirect
-)
+require github.com/jmespath/go-jmespath v0.4.0 // indirect
