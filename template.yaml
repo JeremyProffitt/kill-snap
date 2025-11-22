@@ -18,15 +18,6 @@ Resources:
       BucketName: !Ref S3BucketName
       VersioningConfiguration:
         Status: Enabled
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: s3:ObjectCreated:*
-            Function: !GetAtt ThumbnailFunction.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: suffix
-                    Value: .jpg
 
   # DynamoDB table for image metadata
   ImageMetadataTable:
