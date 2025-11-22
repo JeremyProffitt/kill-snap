@@ -1,0 +1,36 @@
+# Lambda build artifacts
+lambda/bootstrap
+lambda/deployment.zip
+*.zip
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# AWS SAM
+.aws-sam/
+samconfig.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test-images/
+*.jpg
+*.jpeg
+*.png
+!.gitkeep
