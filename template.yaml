@@ -8,6 +8,16 @@ Parameters:
     Description: Name of the S3 bucket for images
     Default: image-thumbnails-bucket
 
+  AdminUsername:
+    Type: String
+    Description: Admin username for initial setup
+    Default: admin
+
+  AdminPassword:
+    Type: String
+    Description: Admin password for initial setup
+    NoEcho: true
+
 Resources:
   # S3 Bucket for images with deletion protection
   ImageBucket:
@@ -30,9 +40,54 @@ Resources:
       AttributeDefinitions:
         - AttributeName: ImageGUID
           AttributeType: S
+        - AttributeName: Reviewed
+          AttributeType: S
       KeySchema:
         - AttributeName: ImageGUID
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ReviewedIndex
+          KeySchema:
+            - AttributeName: Reviewed
+              KeyType: HASH
+            - AttributeName: ImageGUID
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB table for users
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: Users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: Username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Username
+          KeyType: HASH
+
+  # DynamoDB table for review groups
+  ReviewGroupsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: ReviewGroups
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ReviewID
+          AttributeType: S
+        - AttributeName: ImageGUID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ReviewID
+          KeyType: HASH
+        - AttributeName: ImageGUID
+          KeyType: RANGE
 
   # Lambda function for thumbnail generation
   ThumbnailFunction:
@@ -43,7 +98,7 @@ Resources:
     Properties:
       FunctionName: ImageThumbnailGenerator
       Runtime: provided.al2023
-      CodeUri: lambda/
+      CodeUri: lambda/thumbnail/
       Handler: bootstrap
       MemorySize: 512
       Timeout: 60
@@ -59,15 +114,133 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ImageMetadataTable
 
+  # API Gateway REST API
+  ImageReviewApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+  # Lambda function for API backend
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: ImageReviewApi
+      Runtime: provided.al2023
+      CodeUri: lambda/api/
+      Handler: bootstrap
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ImageBucket
+          IMAGE_TABLE: !Ref ImageMetadataTable
+          USERS_TABLE: !Ref UsersTable
+          REVIEW_GROUPS_TABLE: !Ref ReviewGroupsTable
+          ADMIN_USERNAME: !Ref AdminUsername
+          ADMIN_PASSWORD: !Ref AdminPassword
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ImageBucket
+        - S3CrudPolicy:
+            BucketName: !Ref ImageBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ImageMetadataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewGroupsTable
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/login
+            Method: POST
+        ListImages:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/images
+            Method: GET
+        UpdateImage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/images/{imageId}
+            Method: PUT
+        DeleteImage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/images/{imageId}
+            Method: DELETE
+        GetPresignedUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/images/{imageId}/download
+            Method: GET
+
+  # S3 bucket for web frontend
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${S3BucketName}-web
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub ${WebsiteBucket.Arn}/*
+
 Outputs:
   BucketName:
     Description: S3 Bucket Name
     Value: !Ref ImageBucket
 
-  DynamoDBTableName:
-    Description: DynamoDB Table Name
+  WebsiteURL:
+    Description: Website URL
+    Value: !GetAtt WebsiteBucket.WebsiteURL
+
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${ImageReviewApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  ImageMetadataTableName:
+    Description: Image Metadata DynamoDB Table Name
     Value: !Ref ImageMetadataTable
 
-  LambdaFunctionArn:
-    Description: Lambda Function ARN
+  UsersTableName:
+    Description: Users DynamoDB Table Name
+    Value: !Ref UsersTable
+
+  ReviewGroupsTableName:
+    Description: Review Groups DynamoDB Table Name
+    Value: !Ref ReviewGroupsTable
+
+  ThumbnailLambdaArn:
+    Description: Thumbnail Lambda Function ARN
     Value: !GetAtt ThumbnailFunction.Arn
+
+  ApiLambdaArn:
+    Description: API Lambda Function ARN
+    Value: !GetAtt ApiFunction.Arn
