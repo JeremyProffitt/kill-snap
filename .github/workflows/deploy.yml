@@ -50,6 +50,17 @@ jobs:
         run: |
           sam build
 
+      - name: Create SAM deployment bucket if needed
+        run: |
+          BUCKET_NAME="sam-deploy-kill-snap-${AWS_REGION}"
+          if ! aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "Bucket ${BUCKET_NAME} already exists"
+          else
+            echo "Creating SAM deployment bucket: ${BUCKET_NAME}"
+            aws s3 mb "s3://${BUCKET_NAME}" --region ${AWS_REGION} || true
+          fi
+        continue-on-error: true
+
       - name: Deploy SAM application
         run: |
           sam deploy \
@@ -57,7 +68,8 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --parameter-overrides S3BucketName=${{ vars.S3_BUCKET }} \
             --no-fail-on-empty-changeset \
-            --resolve-s3
+            --s3-bucket sam-deploy-kill-snap-${AWS_REGION} \
+            --region ${AWS_REGION}
 
       - name: Protect S3 bucket from deletion
         if: steps.check-bucket.outputs.exists == 'false'
