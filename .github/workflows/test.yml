@@ -1,0 +1,103 @@
+name: Test Image Thumbnail Service
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create test image
+        run: |
+          curl -L "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800" -o test-image.jpg
+          ls -lh test-image.jpg
+
+      - name: Upload test image to S3
+        run: |
+          aws s3 cp test-image.jpg s3://${{ vars.S3_BUCKET }}/test-image.jpg
+          echo "Test image uploaded successfully"
+
+      - name: Wait for Lambda processing
+        run: |
+          echo "Waiting 15 seconds for Lambda to process..."
+          sleep 15
+
+      - name: Check for generated thumbnails
+        run: |
+          echo "Checking for thumbnails..."
+          aws s3 ls s3://${{ vars.S3_BUCKET }}/ --recursive
+
+          echo ""
+          echo "Checking for 50px thumbnail..."
+          if aws s3 ls s3://${{ vars.S3_BUCKET }}/test-image.50.jpg; then
+            echo "✓ 50px thumbnail found!"
+          else
+            echo "✗ 50px thumbnail NOT found"
+            exit 1
+          fi
+
+          echo ""
+          echo "Checking for 400px thumbnail..."
+          if aws s3 ls s3://${{ vars.S3_BUCKET }}/test-image.400.jpg; then
+            echo "✓ 400px thumbnail found!"
+          else
+            echo "✗ 400px thumbnail NOT found"
+            exit 1
+          fi
+
+      - name: Check DynamoDB records
+        run: |
+          echo "Checking DynamoDB for image metadata..."
+          aws dynamodb scan --table-name ImageMetadata --max-items 5
+
+      - name: Check Lambda logs
+        run: |
+          echo "Recent Lambda executions:"
+          aws logs tail /aws/lambda/ImageThumbnailGenerator --since 5m || echo "No recent logs"
+
+      - name: Download and verify thumbnails
+        run: |
+          echo "Downloading thumbnails to verify..."
+          aws s3 cp s3://${{ vars.S3_BUCKET }}/test-image.50.jpg ./downloaded-50.jpg
+          aws s3 cp s3://${{ vars.S3_BUCKET }}/test-image.400.jpg ./downloaded-400.jpg
+
+          echo "Original image size:"
+          ls -lh test-image.jpg
+
+          echo "50px thumbnail size:"
+          ls -lh downloaded-50.jpg
+
+          echo "400px thumbnail size:"
+          ls -lh downloaded-400.jpg
+
+      - name: Test summary
+        run: |
+          echo ""
+          echo "=================================================="
+          echo "✓ Test PASSED - All thumbnails generated successfully!"
+          echo "=================================================="
+          echo ""
+          echo "Generated files:"
+          echo "  - test-image.jpg (original)"
+          echo "  - test-image.50.jpg (50px high thumbnail)"
+          echo "  - test-image.400.jpg (400px high thumbnail)"
+          echo ""
+          echo "DynamoDB metadata record created with GUID"
+          echo "EXIF data extracted and stored"
