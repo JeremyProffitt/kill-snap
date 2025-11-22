@@ -127,7 +127,7 @@ jobs:
       - name: Build and deploy web frontend
         run: |
           cd web
-          npm ci
+          npm install
           npm run build
 
           # Get website bucket name from stack outputs
