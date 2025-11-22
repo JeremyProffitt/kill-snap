@@ -69,15 +69,6 @@ Resources:
                   - Name: suffix
                     Value: .jpg
 
-  # Permission for S3 to invoke Lambda
-  ThumbnailFunctionPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref ThumbnailFunction
-      Action: lambda:InvokeFunction
-      Principal: s3.amazonaws.com
-      SourceArn: !GetAtt ImageBucket.Arn
-
 Outputs:
   BucketName:
     Description: S3 Bucket Name
