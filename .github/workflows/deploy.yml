@@ -64,7 +64,10 @@ jobs:
       - name: Deploy SAM application
         run: |
           sam deploy \
-            --parameter-overrides S3BucketName=${{ vars.S3_BUCKET }} \
+            --parameter-overrides \
+              S3BucketName=${{ vars.S3_BUCKET }} \
+              AdminUsername=${{ vars.ADMIN_USER }} \
+              AdminPassword=${{ secrets.ADMIN_PASSWORD }} \
             --no-fail-on-empty-changeset
 
       - name: Configure S3 event notification
@@ -72,7 +75,7 @@ jobs:
           # Get Lambda ARN from stack outputs
           LAMBDA_ARN=$(aws cloudformation describe-stacks \
             --stack-name image-thumbnail-stack \
-            --query 'Stacks[0].Outputs[?OutputKey==`LambdaFunctionArn`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`ThumbnailLambdaArn`].OutputValue' \
             --output text)
 
           echo "Lambda ARN: ${LAMBDA_ARN}"
