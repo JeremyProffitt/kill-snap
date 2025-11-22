@@ -1,0 +1,95 @@
+.gallery-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.gallery-header {
+  background: white;
+  padding: 1rem 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gallery-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.image-count {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.logout-button {
+  padding: 0.5rem 1rem;
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.logout-button:hover {
+  background: #c82333;
+}
+
+.loading,
+.error-message,
+.empty-state {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.2rem;
+  color: #666;
+}
+
+.error-message {
+  color: #dc3545;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 1rem;
+  padding: 2rem;
+}
+
+.gallery-item {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.gallery-item:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.thumbnail {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.image-info {
+  padding: 0.5rem;
+  background: #f8f9fa;
+}
+
+.image-dimensions {
+  font-size: 0.8rem;
+  color: #666;
+  text-align: center;
+}

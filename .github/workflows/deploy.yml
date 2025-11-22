@@ -124,6 +124,23 @@ jobs:
             --bucket ${{ vars.S3_BUCKET }} \
             --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
 
+      - name: Build and deploy web frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+          # Get website bucket name from stack outputs
+          WEBSITE_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name image-thumbnail-stack \
+            --query 'Stacks[0].Outputs[?OutputKey==`WebsiteURL`].OutputValue' \
+            --output text | sed 's|http://||' | sed 's|\.s3-website.*||')
+
+          echo "Deploying to website bucket: ${WEBSITE_BUCKET}"
+
+          # Sync build folder to S3
+          aws s3 sync build/ s3://${WEBSITE_BUCKET}/ --delete
+
       - name: Output deployment info
         run: |
           echo "Deployment completed successfully"

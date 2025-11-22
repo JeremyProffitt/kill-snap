@@ -1,0 +1,196 @@
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  max-width: 900px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.close-button {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  border: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.close-button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.image-preview {
+  background: #f8f9fa;
+  padding: 2rem;
+  text-align: center;
+}
+
+.image-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.image-details {
+  padding: 2rem;
+}
+
+.image-details h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.detail-group {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.detail-group label {
+  font-weight: 500;
+  color: #666;
+}
+
+.form-section {
+  margin-top: 1.5rem;
+}
+
+.form-section h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.form-field {
+  margin-bottom: 1rem;
+}
+
+.form-field label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.form-field input[type="number"],
+.form-field select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.checkbox-field label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.checkbox-field input[type="checkbox"] {
+  margin-right: 0.5rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  cursor: pointer;
+}
+
+.action-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.action-buttons button {
+  padding: 0.75rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.action-buttons button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-approve {
+  background: #28a745;
+  color: white;
+}
+
+.btn-approve:hover:not(:disabled) {
+  background: #218838;
+}
+
+.btn-reject {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-reject:hover:not(:disabled) {
+  background: #5a6268;
+}
+
+.btn-download {
+  background: #007bff;
+  color: white;
+}
+
+.btn-download:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.btn-delete {
+  background: #dc3545;
+  color: white;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background: #c82333;
+}
+
+@media (max-width: 768px) {
+  .modal-body {
+    flex-direction: column;
+  }
+
+  .action-buttons {
+    grid-template-columns: 1fr;
+  }
+}
