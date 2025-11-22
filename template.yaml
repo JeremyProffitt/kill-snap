@@ -37,6 +37,7 @@ Resources:
   # Lambda function for thumbnail generation
   ThumbnailFunction:
     Type: AWS::Serverless::Function
+    DependsOn: ImageBucket
     Metadata:
       BuildMethod: go1.x
     Properties:
@@ -57,17 +58,6 @@ Resources:
             BucketName: !Ref ImageBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref ImageMetadataTable
-      Events:
-        S3Event:
-          Type: S3
-          Properties:
-            Bucket: !Ref ImageBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: suffix
-                    Value: .jpg
 
 Outputs:
   BucketName:
