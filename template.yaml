@@ -46,6 +46,8 @@ Resources:
   # Lambda function for thumbnail generation
   ThumbnailFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
     Properties:
       FunctionName: ImageThumbnailGenerator
       Runtime: provided.al2023

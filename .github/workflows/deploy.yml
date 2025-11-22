@@ -36,11 +36,6 @@ jobs:
         run: |
           pip install aws-sam-cli
 
-      - name: Build Lambda function
-        run: |
-          cd lambda
-          make build
-
       - name: Check if S3 bucket exists
         id: check-bucket
         run: |
@@ -51,10 +46,13 @@ jobs:
           fi
         continue-on-error: true
 
+      - name: Build SAM application
+        run: |
+          sam build
+
       - name: Deploy SAM application
         run: |
           sam deploy \
-            --template-file template.yaml \
             --stack-name image-thumbnail-stack \
             --capabilities CAPABILITY_IAM \
             --parameter-overrides S3BucketName=${{ vars.S3_BUCKET }} \
