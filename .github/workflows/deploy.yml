@@ -64,12 +64,8 @@ jobs:
       - name: Deploy SAM application
         run: |
           sam deploy \
-            --stack-name image-thumbnail-stack \
-            --capabilities CAPABILITY_IAM \
             --parameter-overrides S3BucketName=${{ vars.S3_BUCKET }} \
-            --no-fail-on-empty-changeset \
-            --s3-bucket sam-deploy-kill-snap-${AWS_REGION} \
-            --region ${AWS_REGION}
+            --no-fail-on-empty-changeset
 
       - name: Protect S3 bucket from deletion
         if: steps.check-bucket.outputs.exists == 'false'

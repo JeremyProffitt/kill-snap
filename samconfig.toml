@@ -2,7 +2,7 @@ version = 0.1
 
 [default.deploy.parameters]
 stack_name = "image-thumbnail-stack"
-resolve_s3 = true
+s3_bucket = "sam-deploy-kill-snap-us-east-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 fail_on_empty_changeset = false
