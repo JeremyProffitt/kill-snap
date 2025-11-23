@@ -325,7 +325,10 @@ Resources:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
 Conditions:
-  HasCustomDomain: !Not [!Equals [!Ref DomainName, '']]
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref DomainName, '']]
+    - !Not [!Equals [!Ref CloudFrontCertificateArn, '']]
+    - !Not [!Equals [!Ref HostedZoneId, '']]
 
 Outputs:
   BucketName:
