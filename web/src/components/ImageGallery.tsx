@@ -35,6 +35,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   useEffect(() => {
     loadImages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleImageClick = (image: Image) => {
