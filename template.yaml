@@ -108,8 +108,6 @@ Resources:
   ThumbnailFunction:
     Type: AWS::Serverless::Function
     DependsOn: ImageBucket
-    Metadata:
-      BuildMethod: go1.x
     Properties:
       FunctionName: ImageThumbnailGenerator
       Runtime: provided.al2023
@@ -142,8 +140,6 @@ Resources:
   # Lambda function for API backend
   ApiFunction:
     Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: go1.x
     Properties:
       FunctionName: ImageReviewApi
       Runtime: provided.al2023
