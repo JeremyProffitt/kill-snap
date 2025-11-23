@@ -207,14 +207,6 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub ${S3BucketName}-web
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html
 
   WebsiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -223,53 +215,126 @@ Resources:
       PolicyDocument:
         Statement:
           - Effect: Allow
-            Principal: '*'
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub ${WebsiteBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
-  # ACM Certificate for API (us-east-1)
-  ApiCertificate:
+  # ACM Certificate for CloudFront (must be in us-east-1)
+  CloudFrontCertificate:
     Type: AWS::CertificateManager::Certificate
     Condition: HasCustomDomain
     Properties:
-      DomainName: !Sub api-${DomainName}
+      DomainName: !Ref DomainName
       ValidationMethod: DNS
       DomainValidationOptions:
-        - DomainName: !Sub api-${DomainName}
+        - DomainName: !Ref DomainName
           HostedZoneId: !Ref HostedZoneId
 
-  # Custom Domain for API Gateway
-  ApiCustomDomain:
-    Type: AWS::ApiGateway::DomainName
+  # CloudFront Origin Access Control
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-OAC
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
     Condition: HasCustomDomain
     Properties:
-      DomainName: !Sub api-${DomainName}
-      RegionalCertificateArn: !Ref ApiCertificate
-      EndpointConfiguration:
-        Types:
-          - REGIONAL
-      SecurityPolicy: TLS_1_2
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        DefaultRootObject: index.html
+        Aliases:
+          - !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CloudFrontCertificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          # S3 Origin for website
+          - Id: S3Origin
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOAC
+            S3OriginConfig: {}
+          # API Gateway Origin
+          - Id: APIOrigin
+            DomainName: !Sub ${ImageReviewApi}.execute-api.${AWS::Region}.amazonaws.com
+            OriginPath: /prod
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        CacheBehaviors:
+          # API behavior
+          - PathPattern: /api/*
+            TargetOriginId: APIOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+            Compress: true
+            ForwardedValues:
+              QueryString: true
+              Headers:
+                - Authorization
+                - Content-Type
+              Cookies:
+                Forward: all
+            MinTTL: 0
+            DefaultTTL: 0
+            MaxTTL: 0
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
 
-  # API Gateway Base Path Mapping
-  ApiBasePathMapping:
-    Type: AWS::ApiGateway::BasePathMapping
-    Condition: HasCustomDomain
-    Properties:
-      DomainName: !Ref ApiCustomDomain
-      RestApiId: !Ref ImageReviewApi
-      Stage: prod
-
-  # Route53 Record for API
-  ApiDnsRecord:
+  # Route53 Record for main domain
+  DomainDnsRecord:
     Type: AWS::Route53::RecordSet
     Condition: HasCustomDomain
     Properties:
       HostedZoneId: !Ref HostedZoneId
-      Name: !Sub api-${DomainName}
+      Name: !Ref DomainName
       Type: A
       AliasTarget:
-        DNSName: !GetAtt ApiCustomDomain.RegionalDomainName
-        HostedZoneId: !GetAtt ApiCustomDomain.RegionalHostedZoneId
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront hosted zone ID (constant)
         EvaluateTargetHealth: false
 
 Conditions:
@@ -281,17 +346,22 @@ Outputs:
     Value: !Ref ImageBucket
 
   WebsiteURL:
-    Description: Website URL
-    Value: !GetAtt WebsiteBucket.WebsiteURL
+    Description: Website URL (Direct S3)
+    Value: !Sub https://${WebsiteBucket.RegionalDomainName}
 
   ApiEndpoint:
-    Description: API Gateway endpoint URL
+    Description: API Gateway endpoint URL (Direct)
     Value: !Sub https://${ImageReviewApi}.execute-api.${AWS::Region}.amazonaws.com/prod
 
-  ApiCustomDomainEndpoint:
-    Description: API Custom Domain URL
+  CustomDomainURL:
+    Description: Custom Domain URL (CloudFront)
     Condition: HasCustomDomain
-    Value: !Sub https://api-${DomainName}
+    Value: !Sub https://${DomainName}
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID
+    Condition: HasCustomDomain
+    Value: !Ref CloudFrontDistribution
 
   ImageMetadataTableName:
     Description: Image Metadata DynamoDB Table Name

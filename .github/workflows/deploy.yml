@@ -132,16 +132,26 @@ jobs:
           npm install
           npm run build
 
-          # Get website bucket name from stack outputs
-          WEBSITE_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
-            --query 'Stacks[0].Outputs[?OutputKey==`WebsiteURL`].OutputValue' \
-            --output text | sed 's|http://||' | sed 's|\.s3-website.*||')
+          # Get website bucket name (it's S3BucketName-web)
+          WEBSITE_BUCKET="${{ vars.S3_BUCKET }}-web"
 
           echo "Deploying to website bucket: ${WEBSITE_BUCKET}"
 
           # Sync build folder to S3
           aws s3 sync build/ s3://${WEBSITE_BUCKET}/ --delete
+
+          # Get CloudFront distribution ID and invalidate cache
+          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name image-thumbnail-stack \
+            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
+            --output text)
+
+          if [ ! -z "$DISTRIBUTION_ID" ]; then
+            echo "Invalidating CloudFront distribution: ${DISTRIBUTION_ID}"
+            aws cloudfront create-invalidation \
+              --distribution-id ${DISTRIBUTION_ID} \
+              --paths "/*"
+          fi
 
       - name: Output deployment info
         run: |
