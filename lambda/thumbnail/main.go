@@ -23,17 +23,19 @@ import (
 )
 
 type ImageMetadata struct {
-	ImageGUID      string            `json:"ImageGUID"`
-	OriginalFile   string            `json:"OriginalFile"`
-	Bucket         string            `json:"Bucket"`
-	Thumbnail50    string            `json:"Thumbnail50"`
-	Thumbnail400   string            `json:"Thumbnail400"`
-	RelatedFiles   []string          `json:"RelatedFiles"`
-	EXIFData       map[string]string `json:"EXIFData"`
-	Width          int               `json:"Width"`
-	Height         int               `json:"Height"`
-	FileSize       int64             `json:"FileSize"`
-	Reviewed       string            `json:"Reviewed"`
+	ImageGUID        string            `json:"ImageGUID"`
+	OriginalFile     string            `json:"OriginalFile"`
+	Bucket           string            `json:"Bucket"`
+	Thumbnail50      string            `json:"Thumbnail50"`
+	Thumbnail400     string            `json:"Thumbnail400"`
+	RelatedFiles     []string          `json:"RelatedFiles"`
+	EXIFData         map[string]string `json:"EXIFData"`
+	Width            int               `json:"Width"`
+	Height           int               `json:"Height"`
+	FileSize         int64             `json:"FileSize"`
+	Reviewed         string            `json:"Reviewed"`
+	InsertedDateTime string            `json:"InsertedDateTime"`
+	UpdatedDateTime  string            `json:"UpdatedDateTime"`
 }
 
 var (
@@ -127,18 +129,21 @@ func handler(ctx context.Context, s3Event events.S3Event) error {
 		}
 
 		// Create metadata record
+		now := time.Now().Format(time.RFC3339)
 		metadata := ImageMetadata{
-			ImageGUID:    uuid.New().String(),
-			OriginalFile: key,
-			Bucket:       bucket,
-			Thumbnail50:  thumbnail50Key,
-			Thumbnail400: thumbnail400Key,
-			RelatedFiles: relatedFiles,
-			EXIFData:     exifData,
-			Width:        width,
-			Height:       height,
-			FileSize:     *result.ContentLength,
-			Reviewed:     "false",
+			ImageGUID:        uuid.New().String(),
+			OriginalFile:     key,
+			Bucket:           bucket,
+			Thumbnail50:      thumbnail50Key,
+			Thumbnail400:     thumbnail400Key,
+			RelatedFiles:     relatedFiles,
+			EXIFData:         exifData,
+			Width:            width,
+			Height:           height,
+			FileSize:         *result.ContentLength,
+			Reviewed:         "false",
+			InsertedDateTime: now,
+			UpdatedDateTime:  now,
 		}
 
 		// Store in DynamoDB

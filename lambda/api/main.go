@@ -59,20 +59,22 @@ type LoginResponse struct {
 }
 
 type ImageResponse struct {
-	ImageGUID     string            `json:"imageGUID"`
-	OriginalFile  string            `json:"originalFile"`
-	Thumbnail50   string            `json:"thumbnail50"`
-	Thumbnail400  string            `json:"thumbnail400"`
-	Bucket        string            `json:"bucket"`
-	Width         int               `json:"width"`
-	Height        int               `json:"height"`
-	FileSize      int64             `json:"fileSize"`
-	Reviewed      string            `json:"reviewed"`
-	GroupNumber   int               `json:"groupNumber,omitempty"`
-	ColorCode     string            `json:"colorCode,omitempty"`
-	Promoted      bool              `json:"promoted,omitempty"`
-	EXIFData      map[string]string `json:"exifData,omitempty"`
-	RelatedFiles  []string          `json:"relatedFiles,omitempty"`
+	ImageGUID        string            `json:"imageGUID"`
+	OriginalFile     string            `json:"originalFile"`
+	Thumbnail50      string            `json:"thumbnail50"`
+	Thumbnail400     string            `json:"thumbnail400"`
+	Bucket           string            `json:"bucket"`
+	Width            int               `json:"width"`
+	Height           int               `json:"height"`
+	FileSize         int64             `json:"fileSize"`
+	Reviewed         string            `json:"reviewed"`
+	GroupNumber      int               `json:"groupNumber,omitempty"`
+	ColorCode        string            `json:"colorCode,omitempty"`
+	Promoted         bool              `json:"promoted,omitempty"`
+	EXIFData         map[string]string `json:"exifData,omitempty"`
+	RelatedFiles     []string          `json:"relatedFiles,omitempty"`
+	InsertedDateTime string            `json:"insertedDateTime,omitempty"`
+	UpdatedDateTime  string            `json:"updatedDateTime,omitempty"`
 }
 
 type UpdateImageRequest struct {
@@ -286,7 +288,15 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		}
 		updateExpr += "Reviewed = :reviewed"
 		exprAttrValues[":reviewed"] = &dynamodb.AttributeValue{S: aws.String(updateReq.Reviewed)}
+		first = false
 	}
+
+	// Always update UpdatedDateTime
+	if !first {
+		updateExpr += ", "
+	}
+	updateExpr += "UpdatedDateTime = :updated"
+	exprAttrValues[":updated"] = &dynamodb.AttributeValue{S: aws.String(time.Now().Format(time.RFC3339))}
 
 	// Update the image metadata
 	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{

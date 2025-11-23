@@ -45,7 +45,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: ImageMetadata
+      TableName: kill-snap-ImageMetadata
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: ImageGUID
@@ -71,7 +71,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: Users
+      TableName: kill-snap-Users
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: Username
@@ -86,7 +86,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: ReviewGroups
+      TableName: kill-snap-ReviewGroups
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: ReviewID
