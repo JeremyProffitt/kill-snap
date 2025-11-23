@@ -28,6 +28,11 @@ Parameters:
     Description: Route53 Hosted Zone ID
     Default: ''
 
+  CloudFrontCertificateArn:
+    Type: String
+    Description: ARN of ACM certificate in us-east-1 for CloudFront
+    Default: ''
+
 Resources:
   # S3 Bucket for images with deletion protection
   ImageBucket:
@@ -203,17 +208,6 @@ Resources:
     Properties:
       BucketName: !Sub ${S3BucketName}-web
 
-  # ACM Certificate for CloudFront (must be in us-east-1)
-  CloudFrontCertificate:
-    Type: AWS::CertificateManager::Certificate
-    Condition: HasCustomDomain
-    Properties:
-      DomainName: !Ref DomainName
-      ValidationMethod: DNS
-      DomainValidationOptions:
-        - DomainName: !Ref DomainName
-          HostedZoneId: !Ref HostedZoneId
-
   # CloudFront Origin Access Control
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
@@ -236,7 +230,7 @@ Resources:
         Aliases:
           - !Ref DomainName
         ViewerCertificate:
-          AcmCertificateArn: !Ref CloudFrontCertificate
+          AcmCertificateArn: !Ref CloudFrontCertificateArn
           SslSupportMethod: sni-only
           MinimumProtocolVersion: TLSv1.2_2021
         Origins:

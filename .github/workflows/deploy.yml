@@ -70,6 +70,7 @@ jobs:
               AdminPassword=${{ secrets.ADMIN_PASSWORD }} \
               DomainName=${{ vars.DOMAIN_NAME }} \
               HostedZoneId=${{ vars.HOSTED_ZONE_ID }} \
+              CloudFrontCertificateArn=${{ vars.CLOUDFRONT_CERT_ARN }} \
             --no-fail-on-empty-changeset
 
       - name: Configure S3 event notification
