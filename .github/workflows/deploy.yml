@@ -154,6 +154,20 @@ jobs:
               --paths "/*"
           fi
 
+      - name: Initialize admin user
+        run: |
+          echo "Triggering API Lambda to initialize admin user..."
+
+          # Invoke the Lambda function to trigger admin user creation
+          aws lambda invoke \
+            --function-name ImageReviewApi \
+            --payload '{"httpMethod":"OPTIONS","path":"/api/login"}' \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/lambda-response.json
+
+          echo "Lambda invoked. Admin user should be created if it doesn't exist."
+          cat /tmp/lambda-response.json
+
       - name: Output deployment info
         run: |
           echo "Deployment completed successfully"
