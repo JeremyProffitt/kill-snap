@@ -18,6 +18,21 @@ Parameters:
     Description: Admin password for initial setup
     NoEcho: true
 
+  DomainName:
+    Type: String
+    Description: Custom domain name for API
+    Default: kill-snap.jeremy.ninja
+
+  CertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for custom domain
+    Default: ''
+
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+    Default: ''
+
 Resources:
   # S3 Bucket for images with deletion protection
   ImageBucket:
@@ -212,6 +227,54 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub ${WebsiteBucket.Arn}/*
 
+  # ACM Certificate for API (us-east-1)
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Sub api.${DomainName}
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub api.${DomainName}
+          HostedZoneId: !Ref HostedZoneId
+
+  # Custom Domain for API Gateway
+  ApiCustomDomain:
+    Type: AWS::ApiGateway::DomainName
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Sub api.${DomainName}
+      RegionalCertificateArn: !Ref ApiCertificate
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      SecurityPolicy: TLS_1_2
+
+  # API Gateway Base Path Mapping
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref ApiCustomDomain
+      RestApiId: !Ref ImageReviewApi
+      Stage: prod
+
+  # Route53 Record for API
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub api.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiCustomDomain.RegionalDomainName
+        HostedZoneId: !GetAtt ApiCustomDomain.RegionalHostedZoneId
+        EvaluateTargetHealth: false
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref CertificateArn, '']]
+
 Outputs:
   BucketName:
     Description: S3 Bucket Name
@@ -224,6 +287,11 @@ Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
     Value: !Sub https://${ImageReviewApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  ApiCustomDomainEndpoint:
+    Description: API Custom Domain URL
+    Condition: HasCustomDomain
+    Value: !Sub https://api.${DomainName}
 
   ImageMetadataTableName:
     Description: Image Metadata DynamoDB Table Name
