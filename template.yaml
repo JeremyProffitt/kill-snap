@@ -20,13 +20,8 @@ Parameters:
 
   DomainName:
     Type: String
-    Description: Custom domain name for API
+    Description: Custom domain name for website and API
     Default: kill-snap.jeremy.ninja
-
-  CertificateArn:
-    Type: String
-    Description: ACM Certificate ARN for custom domain
-    Default: ''
 
   HostedZoneId:
     Type: String
@@ -340,7 +335,7 @@ Resources:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
 Conditions:
-  HasCustomDomain: !Not [!Equals [!Ref CertificateArn, '']]
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, '']]
 
 Outputs:
   BucketName:
