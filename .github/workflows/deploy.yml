@@ -42,15 +42,11 @@ jobs:
           # Find existing image bucket with kill-snap in the name
           EXISTING_BUCKET=$(aws s3 ls | grep -o "kill-snap-images-[0-9]*" | head -1 || echo "")
 
-          if [ -n "$EXISTING_BUCKET" ]; then
-            echo "Found existing image bucket: ${EXISTING_BUCKET}"
-            IMAGE_BUCKET="${EXISTING_BUCKET}"
-          else
-            # Use account ID for new bucket name
-            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-            IMAGE_BUCKET="kill-snap-images-${ACCOUNT_ID}"
-            echo "Will use bucket name: ${IMAGE_BUCKET}"
-          fi
+          # Always use a new unique bucket name with timestamp to avoid AWS caching issues
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          TIMESTAMP=$(date +%s)
+          IMAGE_BUCKET="kill-snap-img-${ACCOUNT_ID}-${TIMESTAMP}"
+          echo "Using unique bucket name: ${IMAGE_BUCKET}"
 
           echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
           echo "Bucket name: ${IMAGE_BUCKET}"
