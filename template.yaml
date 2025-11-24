@@ -313,8 +313,8 @@ Resources:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
 Conditions:
-  HasCustomDomain: !Equals [!Ref DomainName, 'DISABLED']
-  HasHostedZone: !Equals [!Ref HostedZoneId, 'DISABLED']
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, 'DISABLED']]
+  HasHostedZone: !Not [!Equals [!Ref HostedZoneId, 'DISABLED']]
 
 Outputs:
   BucketName:
