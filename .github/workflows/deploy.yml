@@ -78,8 +78,8 @@ jobs:
             --query 'Stacks[0].StackStatus' \
             --output text 2>&1 || echo "DOES_NOT_EXIST")
 
-          if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
-            echo "Stack is in ROLLBACK_COMPLETE state, deleting..."
+          if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ] || [ "$STACK_STATUS" = "REVIEW_IN_PROGRESS" ]; then
+            echo "Stack is in $STACK_STATUS state, deleting..."
             aws cloudformation delete-stack \
               --stack-name image-thumbnail-stack \
               --region ${AWS_REGION}
