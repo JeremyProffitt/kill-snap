@@ -113,6 +113,7 @@ jobs:
         continue-on-error: true
 
       - name: Deploy SAM application
+        id: deploy
         run: |
           # Only pass required parameters, CloudFront is disabled
           PARAMS="S3BucketName=${{ steps.check-bucket.outputs.bucket_name }} \
@@ -122,6 +123,19 @@ jobs:
           sam deploy \
             --parameter-overrides ${PARAMS} \
             --no-fail-on-empty-changeset
+        continue-on-error: true
+
+      - name: Debug deployment failure
+        if: steps.deploy.outcome == 'failure'
+        run: |
+          echo "Deployment failed. Checking CloudFormation events..."
+          aws cloudformation describe-stack-events \
+            --stack-name image-thumbnail-stack \
+            --region ${AWS_REGION} \
+            --max-items 10 \
+            --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || contains(ResourceStatusReason, `validation`) || contains(ResourceStatusReason, `ResourceExistenceCheck`)]' \
+            --output json
+          exit 1
 
       - name: Configure S3 event notification
         run: |
