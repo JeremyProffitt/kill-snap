@@ -111,12 +111,26 @@ Resources:
           BUCKET_NAME: !Ref S3BucketName
           DYNAMODB_TABLE: !Ref ImageMetadataTable
       Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref S3BucketName
-        - S3CrudPolicy:
-            BucketName: !Ref S3BucketName
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ImageMetadataTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+                - !Sub 'arn:aws:s3:::${S3BucketName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !GetAtt ImageMetadataTable.Arn
 
   # API Gateway REST API
   ImageReviewApi:
@@ -149,16 +163,29 @@ Resources:
           ADMIN_USERNAME: !Ref AdminUsername
           ADMIN_PASSWORD: !Ref AdminPassword
       Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref S3BucketName
-        - S3CrudPolicy:
-            BucketName: !Ref S3BucketName
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ImageMetadataTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref UsersTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ReviewGroupsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+                - !Sub 'arn:aws:s3:::${S3BucketName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt ImageMetadataTable.Arn
+                - !GetAtt UsersTable.Arn
+                - !GetAtt ReviewGroupsTable.Arn
       Events:
         Login:
           Type: Api
