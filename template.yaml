@@ -312,7 +312,7 @@ Resources:
   # Route53 Record for main domain
   DomainDnsRecord:
     Type: AWS::Route53::RecordSet
-    Condition: HasHostedZone
+    Condition: HasCustomDomainAndHostedZone
     Properties:
       HostedZoneId: !Ref HostedZoneId
       Name: !Ref DomainName
@@ -342,6 +342,9 @@ Resources:
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref DomainName, 'DISABLED']]
   HasHostedZone: !Not [!Equals [!Ref HostedZoneId, 'DISABLED']]
+  HasCustomDomainAndHostedZone: !And
+    - !Not [!Equals [!Ref DomainName, 'DISABLED']]
+    - !Not [!Equals [!Ref HostedZoneId, 'DISABLED']]
 
 Outputs:
   BucketName:
