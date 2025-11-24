@@ -100,9 +100,9 @@ jobs:
             echo "Stack status: $STACK_STATUS"
           fi
 
-          # If stack doesn't exist, clean up any manually-created buckets
+          # If stack doesn't exist, clean up any manually-created/retained resources
           if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
-            echo "Checking for manually-created buckets to clean up..."
+            echo "Checking for manually-created or retained resources to clean up..."
 
             # Check and delete image bucket if it exists
             if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -qv 'NoSuchBucket'; then
@@ -126,7 +126,27 @@ jobs:
               echo "Bucket ${WEBSITE_BUCKET} does not exist"
             fi
 
-            echo "Bucket cleanup complete. CloudFormation will create them as managed resources."
+            # Delete DynamoDB tables (they have Retain policy)
+            for TABLE in kill-snap-ImageMetadata kill-snap-Users kill-snap-ReviewGroups; do
+              if aws dynamodb describe-table --table-name ${TABLE} --region ${AWS_REGION} 2>&1 | grep -q "TableName"; then
+                echo "Deleting retained DynamoDB table: ${TABLE}"
+                aws dynamodb delete-table --table-name ${TABLE} --region ${AWS_REGION} || true
+              else
+                echo "DynamoDB table ${TABLE} does not exist"
+              fi
+            done
+
+            # Delete Lambda functions if they exist
+            for FUNC in ImageThumbnailGenerator ImageReviewApi; do
+              if aws lambda get-function --function-name ${FUNC} --region ${AWS_REGION} 2>&1 | grep -q "FunctionName"; then
+                echo "Deleting Lambda function: ${FUNC}"
+                aws lambda delete-function --function-name ${FUNC} --region ${AWS_REGION} || true
+              else
+                echo "Lambda function ${FUNC} does not exist"
+              fi
+            done
+
+            echo "Resource cleanup complete. CloudFormation will create them as managed resources."
           fi
         continue-on-error: true
 
