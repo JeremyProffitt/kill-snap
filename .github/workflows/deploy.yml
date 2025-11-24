@@ -79,7 +79,9 @@ jobs:
             --stack-name image-thumbnail-stack \
             --region ${AWS_REGION} \
             --query 'Stacks[0].StackStatus' \
-            --output text 2>&1 || echo "DOES_NOT_EXIST")
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+
+          echo "Stack status: $STACK_STATUS"
 
           if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ] || [ "$STACK_STATUS" = "REVIEW_IN_PROGRESS" ]; then
             echo "Stack is in $STACK_STATUS state, deleting..."
