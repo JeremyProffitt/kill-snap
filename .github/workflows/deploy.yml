@@ -112,6 +112,17 @@ jobs:
           fi
         continue-on-error: true
 
+      - name: Package and inspect SAM template
+        run: |
+          # Package the template to see what's being generated
+          sam package \
+            --output-template-file .aws-sam/packaged-template.yaml \
+            --s3-bucket sam-deploy-kill-snap-us-east-2 \
+            --region ${AWS_REGION}
+
+          echo "=== Generated CloudFormation Template ==="
+          cat .aws-sam/packaged-template.yaml
+
       - name: Deploy SAM application
         id: deploy
         run: |
