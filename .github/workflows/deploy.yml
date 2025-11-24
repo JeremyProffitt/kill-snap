@@ -36,24 +36,29 @@ jobs:
         run: |
           pip install aws-sam-cli
 
-      - name: Create S3 buckets if needed
+      - name: Discover or create S3 buckets
         id: check-bucket
         run: |
-          # Create image bucket
-          IMAGE_BUCKET="${{ vars.S3_BUCKET }}"
-          if aws s3 ls "s3://${IMAGE_BUCKET}" 2>&1 | grep -q 'NoSuchBucket'; then
+          # Find existing image bucket with kill-snap in the name
+          EXISTING_BUCKET=$(aws s3 ls | grep -o "kill-snap-images-[0-9]*" | head -1 || echo "")
+
+          if [ -n "$EXISTING_BUCKET" ]; then
+            echo "Found existing image bucket: ${EXISTING_BUCKET}"
+            IMAGE_BUCKET="${EXISTING_BUCKET}"
+            echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
+          else
+            # Create new bucket with account ID suffix
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            IMAGE_BUCKET="kill-snap-images-${ACCOUNT_ID}"
             echo "Creating S3 image bucket: ${IMAGE_BUCKET}"
             aws s3 mb "s3://${IMAGE_BUCKET}" --region ${AWS_REGION}
             aws s3api put-bucket-versioning --bucket ${IMAGE_BUCKET} --versioning-configuration Status=Enabled
             aws s3api put-bucket-tagging --bucket ${IMAGE_BUCKET} --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
-            echo "exists=false" >> $GITHUB_OUTPUT
-          else
-            echo "Image bucket ${IMAGE_BUCKET} already exists"
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
           fi
 
-          # Create website bucket
-          WEBSITE_BUCKET="${{ vars.S3_BUCKET }}-web"
+          # Create website bucket if needed
+          WEBSITE_BUCKET="${IMAGE_BUCKET}-web"
           if aws s3 ls "s3://${WEBSITE_BUCKET}" 2>&1 | grep -q 'NoSuchBucket'; then
             echo "Creating S3 website bucket: ${WEBSITE_BUCKET}"
             aws s3 mb "s3://${WEBSITE_BUCKET}" --region ${AWS_REGION}
@@ -61,6 +66,9 @@ jobs:
           else
             echo "Website bucket ${WEBSITE_BUCKET} already exists"
           fi
+
+          echo "Using image bucket: ${IMAGE_BUCKET}"
+          echo "Using website bucket: ${WEBSITE_BUCKET}"
 
       - name: Build SAM application
         run: |
@@ -106,7 +114,7 @@ jobs:
 
       - name: Deploy SAM application
         run: |
-          PARAMS="S3BucketName=${{ vars.S3_BUCKET }} \
+          PARAMS="S3BucketName=${{ steps.check-bucket.outputs.bucket_name }} \
             AdminUsername=${{ vars.ADMIN_USER }} \
             AdminPassword=${{ secrets.ADMIN_PASSWORD }} \
             DomainName=${{ vars.DOMAIN_NAME }} \
@@ -123,6 +131,8 @@ jobs:
 
       - name: Configure S3 event notification
         run: |
+          IMAGE_BUCKET="${{ steps.check-bucket.outputs.bucket_name }}"
+
           # Get Lambda ARN from stack outputs
           LAMBDA_ARN=$(aws cloudformation describe-stacks \
             --stack-name image-thumbnail-stack \
@@ -130,6 +140,7 @@ jobs:
             --output text)
 
           echo "Lambda ARN: ${LAMBDA_ARN}"
+          echo "Configuring notifications for bucket: ${IMAGE_BUCKET}"
 
           # Add Lambda permission for S3 to invoke
           aws lambda add-permission \
@@ -137,7 +148,7 @@ jobs:
             --statement-id s3-trigger-permission \
             --action lambda:InvokeFunction \
             --principal s3.amazonaws.com \
-            --source-arn arn:aws:s3:::${{ vars.S3_BUCKET }} \
+            --source-arn arn:aws:s3:::${IMAGE_BUCKET} \
             || echo "Permission may already exist"
 
           # Configure S3 bucket notification
@@ -159,7 +170,7 @@ jobs:
           EOF
 
           aws s3api put-bucket-notification-configuration \
-            --bucket ${{ vars.S3_BUCKET }} \
+            --bucket ${IMAGE_BUCKET} \
             --notification-configuration file:///tmp/notification.json
 
       - name: Build and deploy web frontend
@@ -168,8 +179,8 @@ jobs:
           npm install
           npm run build
 
-          # Get website bucket name (it's S3BucketName-web)
-          WEBSITE_BUCKET="${{ vars.S3_BUCKET }}-web"
+          # Get website bucket name (it's discovered bucket name + -web)
+          WEBSITE_BUCKET="${{ steps.check-bucket.outputs.bucket_name }}-web"
 
           echo "Deploying to website bucket: ${WEBSITE_BUCKET}"
 
@@ -206,7 +217,8 @@ jobs:
       - name: Output deployment info
         run: |
           echo "Deployment completed successfully"
-          echo "S3 Bucket: ${{ vars.S3_BUCKET }}"
+          echo "Image S3 Bucket: ${{ steps.check-bucket.outputs.bucket_name }}"
+          echo "Website S3 Bucket: ${{ steps.check-bucket.outputs.bucket_name }}-web"
           aws cloudformation describe-stacks \
             --stack-name image-thumbnail-stack \
             --query 'Stacks[0].Outputs' \
