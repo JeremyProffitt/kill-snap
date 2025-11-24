@@ -97,6 +97,8 @@ Resources:
   # Lambda function for thumbnail generation
   ThumbnailFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       FunctionName: ImageThumbnailGenerator
       Runtime: provided.al2023
@@ -129,6 +131,8 @@ Resources:
   # Lambda function for API backend
   ApiFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       FunctionName: ImageReviewApi
       Runtime: provided.al2023
