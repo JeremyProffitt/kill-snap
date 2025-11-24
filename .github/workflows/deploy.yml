@@ -70,8 +70,11 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Check and fix stuck CloudFormation stack
+      - name: Check and fix stuck CloudFormation stack and clean up buckets
         run: |
+          BUCKET_NAME="${{ steps.check-bucket.outputs.bucket_name }}"
+          WEBSITE_BUCKET="${BUCKET_NAME}-web"
+
           STACK_STATUS=$(aws cloudformation describe-stacks \
             --stack-name image-thumbnail-stack \
             --region ${AWS_REGION} \
@@ -90,30 +93,16 @@ jobs:
               --region ${AWS_REGION}
 
             echo "Stack deleted successfully"
+            STACK_STATUS="DOES_NOT_EXIST"
           elif [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
             echo "Stack does not exist, proceeding with deployment"
           else
             echo "Stack status: $STACK_STATUS"
           fi
-        continue-on-error: true
 
-      - name: Handle manually-created S3 buckets
-        run: |
-          # Check if buckets exist but are not managed by CloudFormation
-          BUCKET_NAME="${{ steps.check-bucket.outputs.bucket_name }}"
-          WEBSITE_BUCKET="${BUCKET_NAME}-web"
-
-          echo "Checking if buckets need to be cleaned up before CloudFormation deployment..."
-
-          # Check if stack exists and manages these buckets
-          STACK_EXISTS=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
-            --region ${AWS_REGION} \
-            --query 'Stacks[0].StackName' \
-            --output text 2>&1 || echo "NO_STACK")
-
-          if [ "$STACK_EXISTS" = "NO_STACK" ]; then
-            echo "Stack doesn't exist. Checking for manually-created buckets..."
+          # If stack doesn't exist, clean up any manually-created buckets
+          if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
+            echo "Checking for manually-created buckets to clean up..."
 
             # Check and delete image bucket if it exists
             if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -qv 'NoSuchBucket'; then
@@ -121,6 +110,9 @@ jobs:
               echo "Emptying and deleting bucket so CloudFormation can manage it..."
               aws s3 rm "s3://${BUCKET_NAME}" --recursive || true
               aws s3api delete-bucket --bucket "${BUCKET_NAME}" --region ${AWS_REGION} || true
+              echo "Deleted ${BUCKET_NAME}"
+            else
+              echo "Bucket ${BUCKET_NAME} does not exist"
             fi
 
             # Check and delete website bucket if it exists
@@ -129,11 +121,12 @@ jobs:
               echo "Emptying and deleting bucket so CloudFormation can manage it..."
               aws s3 rm "s3://${WEBSITE_BUCKET}" --recursive || true
               aws s3api delete-bucket --bucket "${WEBSITE_BUCKET}" --region ${AWS_REGION} || true
+              echo "Deleted ${WEBSITE_BUCKET}"
+            else
+              echo "Bucket ${WEBSITE_BUCKET} does not exist"
             fi
 
             echo "Bucket cleanup complete. CloudFormation will create them as managed resources."
-          else
-            echo "Stack exists. Buckets should already be managed by CloudFormation."
           fi
         continue-on-error: true
 
