@@ -194,6 +194,7 @@ Resources:
   # CloudFront Origin Access Control
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
+    Condition: HasCustomDomain
     Properties:
       OriginAccessControlConfig:
         Name: !Sub ${AWS::StackName}-OAC
