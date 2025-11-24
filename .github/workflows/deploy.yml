@@ -36,7 +36,7 @@ jobs:
         run: |
           pip install aws-sam-cli
 
-      - name: Discover or create S3 buckets
+      - name: Determine bucket name
         id: check-bucket
         run: |
           # Find existing image bucket with kill-snap in the name
@@ -45,30 +45,15 @@ jobs:
           if [ -n "$EXISTING_BUCKET" ]; then
             echo "Found existing image bucket: ${EXISTING_BUCKET}"
             IMAGE_BUCKET="${EXISTING_BUCKET}"
-            echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
           else
-            # Create new bucket with account ID suffix
+            # Use account ID for new bucket name
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
             IMAGE_BUCKET="kill-snap-images-${ACCOUNT_ID}"
-            echo "Creating S3 image bucket: ${IMAGE_BUCKET}"
-            aws s3 mb "s3://${IMAGE_BUCKET}" --region ${AWS_REGION}
-            aws s3api put-bucket-versioning --bucket ${IMAGE_BUCKET} --versioning-configuration Status=Enabled
-            aws s3api put-bucket-tagging --bucket ${IMAGE_BUCKET} --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
-            echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
+            echo "Will use bucket name: ${IMAGE_BUCKET}"
           fi
 
-          # Create website bucket if needed
-          WEBSITE_BUCKET="${IMAGE_BUCKET}-web"
-          if aws s3 ls "s3://${WEBSITE_BUCKET}" 2>&1 | grep -q 'NoSuchBucket'; then
-            echo "Creating S3 website bucket: ${WEBSITE_BUCKET}"
-            aws s3 mb "s3://${WEBSITE_BUCKET}" --region ${AWS_REGION}
-            aws s3api put-bucket-tagging --bucket ${WEBSITE_BUCKET} --tagging 'TagSet=[{Key=Purpose,Value=WebsiteHosting},{Key=ManagedBy,Value=GitHub-Actions}]'
-          else
-            echo "Website bucket ${WEBSITE_BUCKET} already exists"
-          fi
-
-          echo "Using image bucket: ${IMAGE_BUCKET}"
-          echo "Using website bucket: ${WEBSITE_BUCKET}"
+          echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
+          echo "Bucket name: ${IMAGE_BUCKET}"
 
       - name: Build SAM application
         run: |
@@ -150,7 +135,11 @@ jobs:
 
       - name: Configure S3 event notification
         run: |
-          IMAGE_BUCKET="${{ steps.check-bucket.outputs.bucket_name }}"
+          # Get bucket name from CloudFormation outputs
+          IMAGE_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name image-thumbnail-stack \
+            --query 'Stacks[0].Outputs[?OutputKey==`ImageBucketName`].OutputValue' \
+            --output text)
 
           # Get Lambda ARN from stack outputs
           LAMBDA_ARN=$(aws cloudformation describe-stacks \
@@ -198,8 +187,11 @@ jobs:
           npm install
           npm run build
 
-          # Get website bucket name (it's discovered bucket name + -web)
-          WEBSITE_BUCKET="${{ steps.check-bucket.outputs.bucket_name }}-web"
+          # Get website bucket name from CloudFormation outputs
+          WEBSITE_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name image-thumbnail-stack \
+            --query 'Stacks[0].Outputs[?OutputKey==`WebsiteBucketName`].OutputValue' \
+            --output text)
 
           echo "Deploying to website bucket: ${WEBSITE_BUCKET}"
 
@@ -236,8 +228,8 @@ jobs:
       - name: Output deployment info
         run: |
           echo "Deployment completed successfully"
-          echo "Image S3 Bucket: ${{ steps.check-bucket.outputs.bucket_name }}"
-          echo "Website S3 Bucket: ${{ steps.check-bucket.outputs.bucket_name }}-web"
+          echo ""
+          echo "=== CloudFormation Stack Outputs ==="
           aws cloudformation describe-stacks \
             --stack-name image-thumbnail-stack \
             --query 'Stacks[0].Outputs' \

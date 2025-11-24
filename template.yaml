@@ -34,6 +34,34 @@ Parameters:
     Default: 'DISABLED'
 
 Resources:
+  # S3 bucket for image storage
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref S3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Lifecycle
+          Value: Retain
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # S3 bucket for website hosting
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${S3BucketName}-web
+      Tags:
+        - Key: Purpose
+          Value: WebsiteHosting
+        - Key: ManagedBy
+          Value: CloudFormation
+
   # DynamoDB table for image metadata
   ImageMetadataTable:
     Type: AWS::DynamoDB::Table
@@ -247,7 +275,7 @@ Resources:
         Origins:
           # S3 Origin for website
           - Id: S3Origin
-            DomainName: !Sub ${S3BucketName}-web.s3.${AWS::Region}.amazonaws.com
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
             OriginAccessControlId: !Ref CloudFrontOAC
             S3OriginConfig: {}
           # API Gateway Origin
@@ -327,14 +355,14 @@ Resources:
     Type: AWS::S3::BucketPolicy
     Condition: HasCustomDomain
     Properties:
-      Bucket: !Sub ${S3BucketName}-web
+      Bucket: !Ref WebsiteBucket
       PolicyDocument:
         Statement:
           - Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub arn:aws:s3:::${S3BucketName}-web/*
+            Resource: !Sub ${WebsiteBucket.Arn}/*
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
@@ -347,13 +375,17 @@ Conditions:
     - !Not [!Equals [!Ref HostedZoneId, 'DISABLED']]
 
 Outputs:
-  BucketName:
-    Description: S3 Bucket Name
-    Value: !Ref S3BucketName
+  ImageBucketName:
+    Description: Image S3 Bucket Name
+    Value: !Ref ImageBucket
+
+  WebsiteBucketName:
+    Description: Website S3 Bucket Name
+    Value: !Ref WebsiteBucket
 
   WebsiteURL:
     Description: Website URL (Direct S3)
-    Value: !Sub https://${S3BucketName}-web.s3.${AWS::Region}.amazonaws.com
+    Value: !Sub https://${WebsiteBucket.RegionalDomainName}
 
   ApiEndpoint:
     Description: API Gateway endpoint URL (Direct)
