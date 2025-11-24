@@ -77,6 +77,33 @@ jobs:
           fi
         continue-on-error: true
 
+      - name: Check and fix stuck CloudFormation stack
+        run: |
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name image-thumbnail-stack \
+            --region ${AWS_REGION} \
+            --query 'Stacks[0].StackStatus' \
+            --output text 2>&1 || echo "DOES_NOT_EXIST")
+
+          if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
+            echo "Stack is in ROLLBACK_COMPLETE state, deleting..."
+            aws cloudformation delete-stack \
+              --stack-name image-thumbnail-stack \
+              --region ${AWS_REGION}
+
+            echo "Waiting for stack deletion..."
+            aws cloudformation wait stack-delete-complete \
+              --stack-name image-thumbnail-stack \
+              --region ${AWS_REGION}
+
+            echo "Stack deleted successfully"
+          elif [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
+            echo "Stack does not exist, proceeding with deployment"
+          else
+            echo "Stack status: $STACK_STATUS"
+          fi
+        continue-on-error: true
+
       - name: Deploy SAM application
         run: |
           PARAMS="S3BucketName=${{ vars.S3_BUCKET }} \
