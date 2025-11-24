@@ -155,6 +155,27 @@ jobs:
               fi
             done
 
+            # Delete CloudWatch log groups (they persist after Lambda deletion)
+            for FUNC in ImageThumbnailGenerator ImageReviewApi; do
+              LOG_GROUP="/aws/lambda/${FUNC}"
+              if aws logs describe-log-groups --log-group-name-prefix ${LOG_GROUP} --region ${AWS_REGION} 2>&1 | grep -q "logGroupName"; then
+                echo "Deleting CloudWatch log group: ${LOG_GROUP}"
+                aws logs delete-log-group --log-group-name ${LOG_GROUP} --region ${AWS_REGION} || true
+              else
+                echo "Log group ${LOG_GROUP} does not exist"
+              fi
+            done
+
+            # Delete API Gateway REST APIs (if they exist with specific name patterns)
+            API_NAME="image-thumbnail-stack"
+            API_ID=$(aws apigateway get-rest-apis --region ${AWS_REGION} --query "items[?name=='${API_NAME}'].id" --output text 2>/dev/null || echo "")
+            if [ -n "$API_ID" ]; then
+              echo "Deleting API Gateway: ${API_NAME} (ID: ${API_ID})"
+              aws apigateway delete-rest-api --rest-api-id ${API_ID} --region ${AWS_REGION} || true
+            else
+              echo "API Gateway ${API_NAME} does not exist"
+            fi
+
             echo "Resource cleanup complete. CloudFormation will create them as managed resources."
             echo "Waiting 10 seconds for AWS to fully propagate deletions..."
             sleep 10
