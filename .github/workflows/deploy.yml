@@ -36,15 +36,31 @@ jobs:
         run: |
           pip install aws-sam-cli
 
-      - name: Check if S3 bucket exists
+      - name: Create S3 image bucket if needed
         id: check-bucket
         run: |
-          if aws s3 ls "s3://${{ vars.S3_BUCKET }}" 2>&1 | grep -q 'NoSuchBucket'; then
+          BUCKET_NAME="${{ vars.S3_BUCKET }}"
+
+          # Check if bucket exists
+          if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "Creating S3 image bucket: ${BUCKET_NAME}"
+            aws s3 mb "s3://${BUCKET_NAME}" --region ${AWS_REGION}
+
+            # Enable versioning
+            aws s3api put-bucket-versioning \
+              --bucket ${BUCKET_NAME} \
+              --versioning-configuration Status=Enabled
+
+            # Tag the bucket
+            aws s3api put-bucket-tagging \
+              --bucket ${BUCKET_NAME} \
+              --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
+
             echo "exists=false" >> $GITHUB_OUTPUT
           else
+            echo "Bucket ${BUCKET_NAME} already exists"
             echo "exists=true" >> $GITHUB_OUTPUT
           fi
-        continue-on-error: true
 
       - name: Build SAM application
         run: |
@@ -118,19 +134,6 @@ jobs:
           aws s3api put-bucket-notification-configuration \
             --bucket ${{ vars.S3_BUCKET }} \
             --notification-configuration file:///tmp/notification.json
-
-      - name: Protect S3 bucket from deletion
-        if: steps.check-bucket.outputs.exists == 'false'
-        run: |
-          # Add bucket policy to prevent deletion
-          aws s3api put-bucket-versioning \
-            --bucket ${{ vars.S3_BUCKET }} \
-            --versioning-configuration Status=Enabled
-
-          # Tag the bucket to indicate it should not be deleted
-          aws s3api put-bucket-tagging \
-            --bucket ${{ vars.S3_BUCKET }} \
-            --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
 
       - name: Build and deploy web frontend
         run: |

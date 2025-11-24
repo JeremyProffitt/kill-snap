@@ -34,16 +34,6 @@ Parameters:
     Default: ''
 
 Resources:
-  # S3 Bucket for images with deletion protection
-  ImageBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketName: !Ref S3BucketName
-      VersioningConfiguration:
-        Status: Enabled
-
   # DynamoDB table for image metadata
   ImageMetadataTable:
     Type: AWS::DynamoDB::Table
@@ -107,7 +97,6 @@ Resources:
   # Lambda function for thumbnail generation
   ThumbnailFunction:
     Type: AWS::Serverless::Function
-    DependsOn: ImageBucket
     Properties:
       FunctionName: ImageThumbnailGenerator
       Runtime: provided.al2023
@@ -117,13 +106,13 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          BUCKET_NAME: !Ref ImageBucket
+          BUCKET_NAME: !Ref S3BucketName
           DYNAMODB_TABLE: !Ref ImageMetadataTable
       Policies:
         - S3ReadPolicy:
-            BucketName: !Ref ImageBucket
+            BucketName: !Ref S3BucketName
         - S3CrudPolicy:
-            BucketName: !Ref ImageBucket
+            BucketName: !Ref S3BucketName
         - DynamoDBCrudPolicy:
             TableName: !Ref ImageMetadataTable
 
@@ -149,7 +138,7 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
-          BUCKET_NAME: !Ref ImageBucket
+          BUCKET_NAME: !Ref S3BucketName
           IMAGE_TABLE: !Ref ImageMetadataTable
           USERS_TABLE: !Ref UsersTable
           REVIEW_GROUPS_TABLE: !Ref ReviewGroupsTable
@@ -157,9 +146,9 @@ Resources:
           ADMIN_PASSWORD: !Ref AdminPassword
       Policies:
         - S3ReadPolicy:
-            BucketName: !Ref ImageBucket
+            BucketName: !Ref S3BucketName
         - S3CrudPolicy:
-            BucketName: !Ref ImageBucket
+            BucketName: !Ref S3BucketName
         - DynamoDBCrudPolicy:
             TableName: !Ref ImageMetadataTable
         - DynamoDBCrudPolicy:
@@ -333,7 +322,7 @@ Conditions:
 Outputs:
   BucketName:
     Description: S3 Bucket Name
-    Value: !Ref ImageBucket
+    Value: !Ref S3BucketName
 
   WebsiteURL:
     Description: Website URL (Direct S3)
