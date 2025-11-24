@@ -97,6 +97,46 @@ jobs:
           fi
         continue-on-error: true
 
+      - name: Handle manually-created S3 buckets
+        run: |
+          # Check if buckets exist but are not managed by CloudFormation
+          BUCKET_NAME="${{ steps.check-bucket.outputs.bucket_name }}"
+          WEBSITE_BUCKET="${BUCKET_NAME}-web"
+
+          echo "Checking if buckets need to be cleaned up before CloudFormation deployment..."
+
+          # Check if stack exists and manages these buckets
+          STACK_EXISTS=$(aws cloudformation describe-stacks \
+            --stack-name image-thumbnail-stack \
+            --region ${AWS_REGION} \
+            --query 'Stacks[0].StackName' \
+            --output text 2>&1 || echo "NO_STACK")
+
+          if [ "$STACK_EXISTS" = "NO_STACK" ]; then
+            echo "Stack doesn't exist. Checking for manually-created buckets..."
+
+            # Check and delete image bucket if it exists
+            if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -qv 'NoSuchBucket'; then
+              echo "Found manually-created bucket: ${BUCKET_NAME}"
+              echo "Emptying and deleting bucket so CloudFormation can manage it..."
+              aws s3 rm "s3://${BUCKET_NAME}" --recursive || true
+              aws s3api delete-bucket --bucket "${BUCKET_NAME}" --region ${AWS_REGION} || true
+            fi
+
+            # Check and delete website bucket if it exists
+            if aws s3 ls "s3://${WEBSITE_BUCKET}" 2>&1 | grep -qv 'NoSuchBucket'; then
+              echo "Found manually-created bucket: ${WEBSITE_BUCKET}"
+              echo "Emptying and deleting bucket so CloudFormation can manage it..."
+              aws s3 rm "s3://${WEBSITE_BUCKET}" --recursive || true
+              aws s3api delete-bucket --bucket "${WEBSITE_BUCKET}" --region ${AWS_REGION} || true
+            fi
+
+            echo "Bucket cleanup complete. CloudFormation will create them as managed resources."
+          else
+            echo "Stack exists. Buckets should already be managed by CloudFormation."
+          fi
+        continue-on-error: true
+
       - name: Package and inspect SAM template
         run: |
           # Package the template to see what's being generated
