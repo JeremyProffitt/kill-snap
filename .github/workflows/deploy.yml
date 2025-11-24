@@ -127,13 +127,22 @@ jobs:
             fi
 
             # Delete DynamoDB tables (they have Retain policy)
+            TABLES_TO_DELETE=""
             for TABLE in kill-snap-ImageMetadata kill-snap-Users kill-snap-ReviewGroups; do
               if aws dynamodb describe-table --table-name ${TABLE} --region ${AWS_REGION} 2>&1 | grep -q "TableName"; then
                 echo "Deleting retained DynamoDB table: ${TABLE}"
                 aws dynamodb delete-table --table-name ${TABLE} --region ${AWS_REGION} || true
+                TABLES_TO_DELETE="${TABLES_TO_DELETE} ${TABLE}"
               else
                 echo "DynamoDB table ${TABLE} does not exist"
               fi
+            done
+
+            # Wait for DynamoDB tables to finish deleting
+            for TABLE in ${TABLES_TO_DELETE}; do
+              echo "Waiting for table ${TABLE} to finish deleting..."
+              aws dynamodb wait table-not-exists --table-name ${TABLE} --region ${AWS_REGION} || true
+              echo "Table ${TABLE} deleted"
             done
 
             # Delete Lambda functions if they exist
