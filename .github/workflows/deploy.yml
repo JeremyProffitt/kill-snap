@@ -76,7 +76,7 @@ jobs:
           WEBSITE_BUCKET="${BUCKET_NAME}-web"
 
           STACK_STATUS=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --region ${AWS_REGION} \
             --query 'Stacks[0].StackStatus' \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
@@ -86,12 +86,12 @@ jobs:
           if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ] || [ "$STACK_STATUS" = "REVIEW_IN_PROGRESS" ]; then
             echo "Stack is in $STACK_STATUS state, deleting..."
             aws cloudformation delete-stack \
-              --stack-name image-thumbnail-stack \
+              --stack-name kill-snap-svc \
               --region ${AWS_REGION}
 
             echo "Waiting for stack deletion..."
             aws cloudformation wait stack-delete-complete \
-              --stack-name image-thumbnail-stack \
+              --stack-name kill-snap-svc \
               --region ${AWS_REGION}
 
             echo "Stack deleted successfully"
@@ -169,7 +169,7 @@ jobs:
             done
 
             # Delete API Gateway REST APIs (if they exist with specific name patterns)
-            API_NAME="image-thumbnail-stack"
+            API_NAME="kill-snap-svc"
             API_ID=$(aws apigateway get-rest-apis --region ${AWS_REGION} --query "items[?name=='${API_NAME}'].id" --output text 2>/dev/null || echo "")
             if [ -n "$API_ID" ]; then
               echo "Deleting API Gateway: ${API_NAME} (ID: ${API_ID})"
@@ -180,7 +180,7 @@ jobs:
 
             # Delete IAM roles created by SAM (they persist after stack deletion)
             echo "Cleaning up IAM roles created by SAM..."
-            for ROLE in $(aws iam list-roles --query "Roles[?contains(RoleName, 'image-thumbnail-stack')].RoleName" --output text 2>/dev/null || echo ""); do
+            for ROLE in $(aws iam list-roles --query "Roles[?contains(RoleName, 'kill-snap-svc')].RoleName" --output text 2>/dev/null || echo ""); do
               if [ -n "$ROLE" ]; then
                 echo "Deleting IAM role: ${ROLE}"
                 # Detach managed policies first
@@ -226,7 +226,7 @@ jobs:
 
           sam deploy \
             --template-file .aws-sam/packaged-template.yaml \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --region ${AWS_REGION} \
             --capabilities CAPABILITY_IAM \
             --s3-bucket sam-deploy-kill-snap-us-east-2 \
@@ -239,7 +239,7 @@ jobs:
         run: |
           echo "Deployment failed. Checking CloudFormation events..."
           aws cloudformation describe-stack-events \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --region ${AWS_REGION} \
             --max-items 10 \
             --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || contains(ResourceStatusReason, `validation`) || contains(ResourceStatusReason, `ResourceExistenceCheck`)]' \
@@ -250,13 +250,13 @@ jobs:
         run: |
           # Get bucket name from CloudFormation outputs
           IMAGE_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --query 'Stacks[0].Outputs[?OutputKey==`ImageBucketName`].OutputValue' \
             --output text)
 
           # Get Lambda ARN from stack outputs
           LAMBDA_ARN=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --query 'Stacks[0].Outputs[?OutputKey==`ThumbnailLambdaArn`].OutputValue' \
             --output text)
 
@@ -302,7 +302,7 @@ jobs:
 
           # Get website bucket name from CloudFormation outputs
           WEBSITE_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --query 'Stacks[0].Outputs[?OutputKey==`WebsiteBucketName`].OutputValue' \
             --output text)
 
@@ -313,7 +313,7 @@ jobs:
 
           # Get CloudFront distribution ID and invalidate cache
           DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
             --output text)
 
@@ -344,6 +344,6 @@ jobs:
           echo ""
           echo "=== CloudFormation Stack Outputs ==="
           aws cloudformation describe-stacks \
-            --stack-name image-thumbnail-stack \
+            --stack-name kill-snap-svc \
             --query 'Stacks[0].Outputs' \
             --output table
