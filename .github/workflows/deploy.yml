@@ -36,30 +36,30 @@ jobs:
         run: |
           pip install aws-sam-cli
 
-      - name: Create S3 image bucket if needed
+      - name: Create S3 buckets if needed
         id: check-bucket
         run: |
-          BUCKET_NAME="${{ vars.S3_BUCKET }}"
-
-          # Check if bucket exists
-          if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
-            echo "Creating S3 image bucket: ${BUCKET_NAME}"
-            aws s3 mb "s3://${BUCKET_NAME}" --region ${AWS_REGION}
-
-            # Enable versioning
-            aws s3api put-bucket-versioning \
-              --bucket ${BUCKET_NAME} \
-              --versioning-configuration Status=Enabled
-
-            # Tag the bucket
-            aws s3api put-bucket-tagging \
-              --bucket ${BUCKET_NAME} \
-              --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
-
+          # Create image bucket
+          IMAGE_BUCKET="${{ vars.S3_BUCKET }}"
+          if aws s3 ls "s3://${IMAGE_BUCKET}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "Creating S3 image bucket: ${IMAGE_BUCKET}"
+            aws s3 mb "s3://${IMAGE_BUCKET}" --region ${AWS_REGION}
+            aws s3api put-bucket-versioning --bucket ${IMAGE_BUCKET} --versioning-configuration Status=Enabled
+            aws s3api put-bucket-tagging --bucket ${IMAGE_BUCKET} --tagging 'TagSet=[{Key=Lifecycle,Value=Retain},{Key=ManagedBy,Value=GitHub-Actions}]'
             echo "exists=false" >> $GITHUB_OUTPUT
           else
-            echo "Bucket ${BUCKET_NAME} already exists"
+            echo "Image bucket ${IMAGE_BUCKET} already exists"
             echo "exists=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Create website bucket
+          WEBSITE_BUCKET="${{ vars.S3_BUCKET }}-web"
+          if aws s3 ls "s3://${WEBSITE_BUCKET}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "Creating S3 website bucket: ${WEBSITE_BUCKET}"
+            aws s3 mb "s3://${WEBSITE_BUCKET}" --region ${AWS_REGION}
+            aws s3api put-bucket-tagging --bucket ${WEBSITE_BUCKET} --tagging 'TagSet=[{Key=Purpose,Value=WebsiteHosting},{Key=ManagedBy,Value=GitHub-Actions}]'
+          else
+            echo "Website bucket ${WEBSITE_BUCKET} already exists"
           fi
 
       - name: Build SAM application
