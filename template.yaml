@@ -21,17 +21,17 @@ Parameters:
   DomainName:
     Type: String
     Description: Custom domain name for website and API
-    Default: kill-snap.jeremy.ninja
+    Default: 'DISABLED'
 
   HostedZoneId:
     Type: String
     Description: Route53 Hosted Zone ID
-    Default: ''
+    Default: 'DISABLED'
 
   CloudFrontCertificateArn:
     Type: String
     Description: ARN of ACM certificate in us-east-1 for CloudFront
-    Default: ''
+    Default: 'DISABLED'
 
 Resources:
   # DynamoDB table for image metadata
