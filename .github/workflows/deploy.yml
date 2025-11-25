@@ -246,6 +246,7 @@ jobs:
           exit 1
 
       - name: Configure S3 event notification
+        continue-on-error: true
         run: |
           # Get bucket name from CloudFormation outputs
           IMAGE_BUCKET=$(aws cloudformation describe-stacks \
