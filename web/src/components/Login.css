@@ -33,6 +33,11 @@
   font-weight: 500;
 }
 
+.password-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
 .form-group input {
   width: 100%;
   padding: 0.75rem;
@@ -40,6 +45,35 @@
   border-radius: 4px;
   font-size: 1rem;
   box-sizing: border-box;
+}
+
+.password-input-wrapper input {
+  padding-right: 3rem;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  width: auto;
+}
+
+.password-toggle:hover {
+  color: #667eea;
+  background: transparent;
+}
+
+.password-toggle svg {
+  display: block;
 }
 
 .form-group input:focus {

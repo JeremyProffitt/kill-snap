@@ -45,7 +45,7 @@ func init() {
 
 	// Initialize admin user if it doesn't exist
 	if adminUsername != "" && adminPassword != "" {
-		go initializeAdminUser()
+		initializeAdminUser()
 	}
 }
 
@@ -85,6 +85,8 @@ type UpdateImageRequest struct {
 }
 
 func initializeAdminUser() {
+	fmt.Printf("Initializing admin user: %s\n", adminUsername)
+
 	// Check if admin user exists
 	result, err := ddbClient.GetItem(&dynamodb.GetItemInput{
 		TableName: aws.String(usersTable),
@@ -93,9 +95,19 @@ func initializeAdminUser() {
 		},
 	})
 
-	if err == nil && result.Item == nil {
+	if err != nil {
+		fmt.Printf("Error checking for admin user: %v\n", err)
+		return
+	}
+
+	if result.Item == nil {
+		fmt.Println("Admin user doesn't exist, creating...")
 		// Create admin user
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+		if err != nil {
+			fmt.Printf("Error hashing password: %v\n", err)
+			return
+		}
 
 		item := map[string]*dynamodb.AttributeValue{
 			"Username":     {S: aws.String(adminUsername)},
@@ -104,10 +116,18 @@ func initializeAdminUser() {
 			"Role":         {S: aws.String("admin")},
 		}
 
-		ddbClient.PutItem(&dynamodb.PutItemInput{
+		_, err = ddbClient.PutItem(&dynamodb.PutItemInput{
 			TableName: aws.String(usersTable),
 			Item:      item,
 		})
+
+		if err != nil {
+			fmt.Printf("Error creating admin user: %v\n", err)
+		} else {
+			fmt.Println("Admin user created successfully!")
+		}
+	} else {
+		fmt.Println("Admin user already exists")
 	}
 }
 
