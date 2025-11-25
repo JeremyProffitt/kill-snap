@@ -249,7 +249,8 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		return errorResponse(500, "Failed to list images", headers)
 	}
 
-	var images []ImageResponse
+	// Initialize as empty slice to ensure JSON returns [] instead of null
+	images := make([]ImageResponse, 0)
 	for _, item := range result.Items {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
