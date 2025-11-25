@@ -1,0 +1,68 @@
+name: Verify Admin User
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check admin user in DynamoDB
+        run: |
+          echo "Checking if admin user exists in DynamoDB..."
+
+          USER_DATA=$(aws dynamodb get-item \
+            --table-name kill-snap-Users \
+            --key '{"Username":{"S":"${{ vars.ADMIN_USER }}"}}' \
+            --region ${AWS_REGION} \
+            --output json)
+
+          echo "User data:"
+          echo "$USER_DATA"
+
+          if echo "$USER_DATA" | grep -q '"Item"'; then
+            echo "✅ Admin user exists!"
+            echo "$USER_DATA" | jq -r '.Item'
+          else
+            echo "❌ Admin user does not exist"
+            exit 1
+          fi
+
+      - name: Check Lambda CloudWatch logs
+        run: |
+          echo "Checking Lambda initialization logs..."
+
+          # Get the most recent log stream for ImageReviewApi
+          LOG_STREAM=$(aws logs describe-log-streams \
+            --log-group-name /aws/lambda/ImageReviewApi \
+            --order-by LastEventTime \
+            --descending \
+            --max-items 1 \
+            --region ${AWS_REGION} \
+            --query 'logStreams[0].logStreamName' \
+            --output text)
+
+          echo "Latest log stream: $LOG_STREAM"
+
+          # Get logs from the stream
+          echo "=== Lambda Initialization Logs ==="
+          aws logs get-log-events \
+            --log-group-name /aws/lambda/ImageReviewApi \
+            --log-stream-name "$LOG_STREAM" \
+            --region ${AWS_REGION} \
+            --query 'events[*].message' \
+            --output text | grep -A 5 -B 5 "admin user" || echo "No admin user logs found"
