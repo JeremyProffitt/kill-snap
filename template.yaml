@@ -34,33 +34,9 @@ Parameters:
     Default: 'DISABLED'
 
 Resources:
-  # S3 bucket for image storage
-  ImageBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketName: !Ref S3BucketName
-      VersioningConfiguration:
-        Status: Enabled
-      Tags:
-        - Key: Lifecycle
-          Value: Retain
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # S3 bucket for website hosting
-  WebsiteBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketName: !Sub ${S3BucketName}-web
-      Tags:
-        - Key: Purpose
-          Value: WebsiteHosting
-        - Key: ManagedBy
-          Value: CloudFormation
+  # S3 buckets are created by the deployment pipeline using AWS CLI
+  # ImageBucket: $S3_BUCKET (from GitHub variables)
+  # WebsiteBucket: $S3_BUCKET-web
 
   # DynamoDB table for image metadata
   ImageMetadataTable:
@@ -275,7 +251,7 @@ Resources:
         Origins:
           # S3 Origin for website
           - Id: S3Origin
-            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            DomainName: !Sub ${S3BucketName}-web.s3.${AWS::Region}.amazonaws.com
             OriginAccessControlId: !Ref CloudFrontOAC
             S3OriginConfig: {}
           # API Gateway Origin
@@ -355,14 +331,14 @@ Resources:
     Type: AWS::S3::BucketPolicy
     Condition: HasCustomDomain
     Properties:
-      Bucket: !Ref WebsiteBucket
+      Bucket: !Sub ${S3BucketName}-web
       PolicyDocument:
         Statement:
           - Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub ${WebsiteBucket.Arn}/*
+            Resource: !Sub arn:aws:s3:::${S3BucketName}-web/*
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
@@ -377,15 +353,15 @@ Conditions:
 Outputs:
   ImageBucketName:
     Description: Image S3 Bucket Name
-    Value: !Ref ImageBucket
+    Value: !Ref S3BucketName
 
   WebsiteBucketName:
     Description: Website S3 Bucket Name
-    Value: !Ref WebsiteBucket
+    Value: !Sub ${S3BucketName}-web
 
   WebsiteURL:
     Description: Website URL (Direct S3)
-    Value: !Sub https://${WebsiteBucket.RegionalDomainName}
+    Value: !Sub https://${S3BucketName}-web.s3.${AWS::Region}.amazonaws.com
 
   ApiEndpoint:
     Description: API Gateway endpoint URL (Direct)

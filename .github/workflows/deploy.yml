@@ -36,20 +36,47 @@ jobs:
         run: |
           pip install aws-sam-cli
 
-      - name: Determine bucket name
+      - name: Ensure S3 buckets exist
         id: check-bucket
         run: |
-          # Find existing image bucket with kill-snap in the name
-          EXISTING_BUCKET=$(aws s3 ls | grep -o "kill-snap-images-[0-9]*" | head -1 || echo "")
+          IMAGE_BUCKET="${{ vars.S3_BUCKET }}"
+          WEBSITE_BUCKET="${IMAGE_BUCKET}-web"
 
-          # Always use a new unique bucket name with timestamp to avoid AWS caching issues
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          TIMESTAMP=$(date +%s)
-          IMAGE_BUCKET="kill-snap-img-${ACCOUNT_ID}-${TIMESTAMP}"
-          echo "Using unique bucket name: ${IMAGE_BUCKET}"
+          echo "Image bucket: ${IMAGE_BUCKET}"
+          echo "Website bucket: ${WEBSITE_BUCKET}"
+
+          # Create image bucket if it doesn't exist
+          if aws s3api head-bucket --bucket "${IMAGE_BUCKET}" 2>/dev/null; then
+            echo "Image bucket ${IMAGE_BUCKET} already exists"
+          else
+            echo "Creating image bucket: ${IMAGE_BUCKET}"
+            aws s3api create-bucket \
+              --bucket "${IMAGE_BUCKET}" \
+              --region ${AWS_REGION} \
+              --create-bucket-configuration LocationConstraint=${AWS_REGION}
+
+            # Enable versioning on image bucket
+            aws s3api put-bucket-versioning \
+              --bucket "${IMAGE_BUCKET}" \
+              --versioning-configuration Status=Enabled
+
+            echo "Image bucket created with versioning enabled"
+          fi
+
+          # Create website bucket if it doesn't exist
+          if aws s3api head-bucket --bucket "${WEBSITE_BUCKET}" 2>/dev/null; then
+            echo "Website bucket ${WEBSITE_BUCKET} already exists"
+          else
+            echo "Creating website bucket: ${WEBSITE_BUCKET}"
+            aws s3api create-bucket \
+              --bucket "${WEBSITE_BUCKET}" \
+              --region ${AWS_REGION} \
+              --create-bucket-configuration LocationConstraint=${AWS_REGION}
+
+            echo "Website bucket created"
+          fi
 
           echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
-          echo "Bucket name: ${IMAGE_BUCKET}"
 
       - name: Build SAM application
         run: |
@@ -66,11 +93,8 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Check and fix stuck CloudFormation stack and clean up buckets
+      - name: Check and fix stuck CloudFormation stack and clean up resources
         run: |
-          BUCKET_NAME="${{ steps.check-bucket.outputs.bucket_name }}"
-          WEBSITE_BUCKET="${BUCKET_NAME}-web"
-
           STACK_STATUS=$(aws cloudformation describe-stacks \
             --stack-name kill-snap-svc \
             --region ${AWS_REGION} \
@@ -98,31 +122,9 @@ jobs:
             echo "Stack status: $STACK_STATUS"
           fi
 
-          # If stack doesn't exist, clean up any manually-created/retained resources
+          # If stack doesn't exist, clean up any retained resources (except S3 buckets which are managed separately)
           if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
-            echo "Checking for manually-created or retained resources to clean up..."
-
-            # Check and delete image bucket if it exists
-            if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -qv 'NoSuchBucket'; then
-              echo "Found manually-created bucket: ${BUCKET_NAME}"
-              echo "Emptying and deleting bucket so CloudFormation can manage it..."
-              aws s3 rm "s3://${BUCKET_NAME}" --recursive || true
-              aws s3api delete-bucket --bucket "${BUCKET_NAME}" --region ${AWS_REGION} || true
-              echo "Deleted ${BUCKET_NAME}"
-            else
-              echo "Bucket ${BUCKET_NAME} does not exist"
-            fi
-
-            # Check and delete website bucket if it exists
-            if aws s3 ls "s3://${WEBSITE_BUCKET}" 2>&1 | grep -qv 'NoSuchBucket'; then
-              echo "Found manually-created bucket: ${WEBSITE_BUCKET}"
-              echo "Emptying and deleting bucket so CloudFormation can manage it..."
-              aws s3 rm "s3://${WEBSITE_BUCKET}" --recursive || true
-              aws s3api delete-bucket --bucket "${WEBSITE_BUCKET}" --region ${AWS_REGION} || true
-              echo "Deleted ${WEBSITE_BUCKET}"
-            else
-              echo "Bucket ${WEBSITE_BUCKET} does not exist"
-            fi
+            echo "Checking for retained resources to clean up..."
 
             # Delete DynamoDB tables (they have Retain policy)
             TABLES_TO_DELETE=""
