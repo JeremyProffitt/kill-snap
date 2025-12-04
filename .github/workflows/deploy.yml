@@ -320,11 +320,27 @@ jobs:
 
           echo "Image CDN URL: ${IMAGE_CDN_URL}"
 
+          # Validate CDN URL was retrieved (should start with https://)
+          if [[ ! "${IMAGE_CDN_URL}" =~ ^https:// ]]; then
+            echo "ERROR: Failed to get valid Image CDN URL from CloudFormation"
+            echo "Got: '${IMAGE_CDN_URL}'"
+            exit 1
+          fi
+
           cd web
           npm install
 
-          # Build with environment variables
-          REACT_APP_IMAGE_CDN_URL=${IMAGE_CDN_URL} npm run build
+          # Build with environment variables - export to ensure React picks it up
+          export REACT_APP_IMAGE_CDN_URL="${IMAGE_CDN_URL}"
+          npm run build
+
+          # Verify CDN URL is in the build
+          if grep -q "cloudfront" build/static/js/*.js; then
+            echo "✓ CDN URL successfully embedded in frontend build"
+          else
+            echo "WARNING: CDN URL may not be in build, checking..."
+            grep -o 'getImageUrl[^}]*}' build/static/js/*.js | head -1
+          fi
 
           # Get website bucket name from CloudFormation outputs
           WEBSITE_BUCKET=$(aws cloudformation describe-stacks \
