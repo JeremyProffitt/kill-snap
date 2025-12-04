@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import { Image } from '../types';
 import './ImageModal.css';
@@ -9,30 +9,45 @@ interface ImageModalProps {
   onUpdate: () => void;
 }
 
-const COLOR_CODES = [
-  { value: 'red', label: 'Red' },
-  { value: 'blue', label: 'Blue' },
-  { value: 'green', label: 'Green' },
-  { value: 'yellow', label: 'Yellow' },
-  { value: 'purple', label: 'Purple' },
-  { value: 'orange', label: 'Orange' },
-  { value: 'pink', label: 'Pink' },
-  { value: 'brown', label: 'Brown' },
+const GROUP_COLORS = [
+  { number: 1, color: '#e74c3c', name: 'Red' },
+  { number: 2, color: '#3498db', name: 'Blue' },
+  { number: 3, color: '#2ecc71', name: 'Green' },
+  { number: 4, color: '#f1c40f', name: 'Yellow' },
+  { number: 5, color: '#9b59b6', name: 'Purple' },
+  { number: 6, color: '#e67e22', name: 'Orange' },
+  { number: 7, color: '#e91e63', name: 'Pink' },
+  { number: 8, color: '#795548', name: 'Brown' },
 ];
 
+const formatFileSize = (bytes: number): string => {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+  }
+  return `${(bytes / 1024).toFixed(1)}K`;
+};
+
+const getFilename = (path: string): string => {
+  const parts = path.split('/');
+  return parts[parts.length - 1];
+};
+
 export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate }) => {
-  const [groupNumber, setGroupNumber] = useState<number>(1);
-  const [colorCode, setColorCode] = useState<string>('red');
-  const [promoted, setPromoted] = useState<boolean>(false);
+  const [groupNumber, setGroupNumber] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleApprove = async () => {
+  const handleApprove = useCallback(async () => {
+    if (groupNumber === null) {
+      alert('Please select a group (1-8) before approving');
+      return;
+    }
     setLoading(true);
     try {
+      const group = GROUP_COLORS.find(g => g.number === groupNumber);
       await api.updateImage(image.imageGUID, {
         groupNumber,
-        colorCode,
-        promoted,
+        colorCode: group?.name.toLowerCase() || 'red',
+        promoted: false,
         reviewed: 'true',
       });
       onUpdate();
@@ -42,9 +57,9 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
     } finally {
       setLoading(false);
     }
-  };
+  }, [groupNumber, image.imageGUID, onUpdate]);
 
-  const handleReject = async () => {
+  const handleReject = useCallback(async () => {
     setLoading(true);
     try {
       await api.updateImage(image.imageGUID, {
@@ -57,13 +72,12 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
     } finally {
       setLoading(false);
     }
-  };
+  }, [image.imageGUID, onUpdate]);
 
-  const handleDelete = async () => {
+  const handleDelete = useCallback(async () => {
     if (!window.confirm('Are you sure you want to delete this image?')) {
       return;
     }
-
     setLoading(true);
     try {
       await api.deleteImage(image.imageGUID);
@@ -74,17 +88,63 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
     } finally {
       setLoading(false);
     }
-  };
+  }, [image.imageGUID, onUpdate]);
 
-  const handleDownload = async () => {
-    try {
-      const url = await api.getDownloadUrl(image.imageGUID);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Failed to get download URL:', err);
-      alert('Failed to download image');
+  const handleGroupSelect = useCallback((num: number) => {
+    if (!loading) {
+      setGroupNumber(num);
     }
-  };
+  }, [loading]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const key = e.key;
+
+      // Number keys 1-8 for group selection
+      if (key >= '1' && key <= '8') {
+        e.preventDefault();
+        handleGroupSelect(parseInt(key));
+        return;
+      }
+
+      // Escape to close
+      if (key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      // Enter to approve (if group selected)
+      if (key === 'Enter' && groupNumber !== null) {
+        e.preventDefault();
+        handleApprove();
+        return;
+      }
+
+      // 'r' to reject
+      if (key === 'r' || key === 'R') {
+        e.preventDefault();
+        handleReject();
+        return;
+      }
+
+      // 'd' or Delete to delete
+      if (key === 'd' || key === 'D' || key === 'Delete') {
+        e.preventDefault();
+        handleDelete();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, onClose, groupNumber]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -107,94 +167,74 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
             />
           </div>
 
-          <div className="image-details">
-            <h2>Review Image</h2>
-
-            <div className="detail-group">
-              <label>Dimensions:</label>
-              <span>{image.width} × {image.height}px</span>
+          <div className="image-meta">
+            <div className="meta-item">
+              <span className="meta-label">File:</span>
+              <span className="meta-value filename">{getFilename(image.originalFile)}</span>
             </div>
-
-            <div className="detail-group">
-              <label>File Size:</label>
-              <span>{(image.fileSize / 1024).toFixed(1)} KB</span>
+            <div className="meta-item">
+              <span className="meta-label">Size:</span>
+              <span className="meta-value">{image.width} × {image.height}px</span>
             </div>
+            <div className="meta-item">
+              <span className="meta-label">File Size:</span>
+              <span className="meta-value">{formatFileSize(image.fileSize)}</span>
+            </div>
+          </div>
 
-            <div className="form-section">
-              <h3>Review Options</h3>
-
-              <div className="form-field">
-                <label htmlFor="groupNumber">Group Number (1-8):</label>
-                <input
-                  id="groupNumber"
-                  type="number"
-                  min="1"
-                  max="8"
-                  value={groupNumber}
-                  onChange={(e) => setGroupNumber(parseInt(e.target.value))}
+          <div className="group-section">
+            <div className="group-label">Assign Group (1-8):</div>
+            <div className="group-buttons">
+              {GROUP_COLORS.map((group) => (
+                <button
+                  key={group.number}
+                  className={`group-btn ${groupNumber === group.number ? 'selected' : ''}`}
+                  style={{
+                    '--group-color': group.color,
+                  } as React.CSSProperties}
+                  onClick={() => handleGroupSelect(group.number)}
                   disabled={loading}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="colorCode">Color Code:</label>
-                <select
-                  id="colorCode"
-                  value={colorCode}
-                  onChange={(e) => setColorCode(e.target.value)}
-                  disabled={loading}
+                  title={`${group.name} (Press ${group.number})`}
                 >
-                  {COLOR_CODES.map((color) => (
-                    <option key={color.value} value={color.value}>
-                      {color.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-field checkbox-field">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={promoted}
-                    onChange={(e) => setPromoted(e.target.checked)}
-                    disabled={loading}
-                  />
-                  <span>Promote</span>
-                </label>
-              </div>
+                  {group.number}
+                </button>
+              ))}
             </div>
+          </div>
 
-            <div className="action-buttons">
-              <button
-                onClick={handleApprove}
-                disabled={loading}
-                className="btn-approve"
-              >
-                Approve
-              </button>
-              <button
-                onClick={handleReject}
-                disabled={loading}
-                className="btn-reject"
-              >
-                Reject
-              </button>
-              <button
-                onClick={handleDownload}
-                disabled={loading}
-                className="btn-download"
-              >
-                Download
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={loading}
-                className="btn-delete"
-              >
-                Delete
-              </button>
-            </div>
+          <div className="action-section">
+            <button
+              onClick={handleApprove}
+              disabled={loading || groupNumber === null}
+              className="btn-approve"
+              title="Approve (Enter)"
+            >
+              Approve
+            </button>
+            <button
+              onClick={handleReject}
+              disabled={loading}
+              className="btn-reject"
+              title="Reject (R)"
+            >
+              Reject
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={loading}
+              className="btn-delete"
+              title="Delete (D)"
+            >
+              Delete
+            </button>
+          </div>
+
+          <div className="keyboard-hints">
+            <span>1-8: Select group</span>
+            <span>Enter: Approve</span>
+            <span>R: Reject</span>
+            <span>D: Delete</span>
+            <span>Esc: Close</span>
           </div>
         </div>
       </div>

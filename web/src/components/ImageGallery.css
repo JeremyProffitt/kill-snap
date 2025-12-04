@@ -1,21 +1,24 @@
 .gallery-container {
   min-height: 100vh;
-  background: #f5f5f5;
+  background: #0f0f1a;
 }
 
 .gallery-header {
-  background: white;
+  background: #1a1a2e;
   padding: 1rem 2rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .gallery-header h1 {
   margin: 0;
   font-size: 1.5rem;
-  color: #333;
+  color: #fff;
 }
 
 .header-actions {
@@ -25,71 +28,74 @@
 }
 
 .image-count {
-  color: #666;
+  color: #8892a6;
   font-size: 0.9rem;
 }
 
 .logout-button {
   padding: 0.5rem 1rem;
-  background: #dc3545;
+  background: #e74c3c;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.2s;
 }
 
 .logout-button:hover {
-  background: #c82333;
+  background: #c0392b;
 }
 
 .loading,
 .error-message,
 .empty-state {
   text-align: center;
-  padding: 3rem;
+  padding: 4rem;
   font-size: 1.2rem;
-  color: #666;
+  color: #8892a6;
 }
 
 .error-message {
-  color: #dc3545;
+  color: #e74c3c;
 }
 
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1.25rem;
   padding: 2rem;
 }
 
 .gallery-item {
-  background: white;
-  border-radius: 8px;
+  background: #1a1a2e;
+  border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .gallery-item:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
 .thumbnail {
   width: 100%;
-  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
   display: block;
 }
 
 .image-info {
-  padding: 0.5rem;
-  background: #f8f9fa;
+  padding: 0.75rem;
+  background: #16213e;
 }
 
 .image-dimensions {
-  font-size: 0.8rem;
-  color: #666;
+  font-size: 0.85rem;
+  color: #8892a6;
   text-align: center;
 }
