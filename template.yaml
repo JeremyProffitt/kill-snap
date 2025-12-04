@@ -188,6 +188,7 @@ Resources:
                 - dynamodb:Scan
               Resource:
                 - !GetAtt ImageMetadataTable.Arn
+                - !Sub ${ImageMetadataTable.Arn}/index/*
                 - !GetAtt UsersTable.Arn
                 - !GetAtt ReviewGroupsTable.Arn
       Events:
