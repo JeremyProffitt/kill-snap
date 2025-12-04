@@ -3,12 +3,28 @@ import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
 import { Image, UpdateImageRequest } from '../types';
 
+export interface ImageFilters {
+  state?: 'unreviewed' | 'approved' | 'rejected' | 'all';
+  group?: number | 'all';
+}
+
 export const api = {
-  async getImages(): Promise<Image[]> {
-    const response = await axios.get<Image[]>(
-      `${API_BASE_URL}/api/images`,
-      { headers: authService.getAuthHeader() }
-    );
+  async getImages(filters?: ImageFilters): Promise<Image[]> {
+    const params = new URLSearchParams();
+    if (filters?.state) {
+      params.append('state', filters.state);
+    }
+    if (filters?.group !== undefined && filters.group !== 'all') {
+      params.append('group', String(filters.group));
+    }
+    const queryString = params.toString();
+    const url = queryString
+      ? `${API_BASE_URL}/api/images?${queryString}`
+      : `${API_BASE_URL}/api/images`;
+
+    const response = await axios.get<Image[]>(url, {
+      headers: authService.getAuthHeader(),
+    });
     return response.data;
   },
 

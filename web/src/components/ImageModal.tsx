@@ -15,14 +15,15 @@ interface ImageModalProps {
 }
 
 const GROUP_COLORS = [
-  { number: 1, color: '#e74c3c', name: 'Red' },
-  { number: 2, color: '#3498db', name: 'Blue' },
-  { number: 3, color: '#2ecc71', name: 'Green' },
-  { number: 4, color: '#f1c40f', name: 'Yellow' },
-  { number: 5, color: '#9b59b6', name: 'Purple' },
-  { number: 6, color: '#e67e22', name: 'Orange' },
-  { number: 7, color: '#e91e63', name: 'Pink' },
-  { number: 8, color: '#795548', name: 'Brown' },
+  { number: 0, color: '#ffffff', name: 'None', textColor: '#333' },
+  { number: 1, color: '#e74c3c', name: 'Red', textColor: '#fff' },
+  { number: 2, color: '#3498db', name: 'Blue', textColor: '#fff' },
+  { number: 3, color: '#2ecc71', name: 'Green', textColor: '#fff' },
+  { number: 4, color: '#f1c40f', name: 'Yellow', textColor: '#333' },
+  { number: 5, color: '#9b59b6', name: 'Purple', textColor: '#fff' },
+  { number: 6, color: '#e67e22', name: 'Orange', textColor: '#fff' },
+  { number: 7, color: '#e91e63', name: 'Pink', textColor: '#fff' },
+  { number: 8, color: '#795548', name: 'Brown', textColor: '#fff' },
 ];
 
 const formatFileSize = (bytes: number): string => {
@@ -47,25 +48,21 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   currentIndex,
   totalImages,
 }) => {
-  const [groupNumber, setGroupNumber] = useState<number | null>(null);
+  const [groupNumber, setGroupNumber] = useState<number>(0);
   const [loading, setLoading] = useState(false);
 
   // Reset group selection when image changes
   useEffect(() => {
-    setGroupNumber(null);
+    setGroupNumber(0);
   }, [image.imageGUID]);
 
   const handleApprove = useCallback(async () => {
-    if (groupNumber === null) {
-      alert('Please select a group (1-8) before approving');
-      return;
-    }
     setLoading(true);
     try {
       const group = GROUP_COLORS.find(g => g.number === groupNumber);
       await api.updateImage(image.imageGUID, {
         groupNumber,
-        colorCode: group?.name.toLowerCase() || 'red',
+        colorCode: group?.name.toLowerCase() || 'none',
         promoted: false,
         reviewed: 'true',
       });
@@ -82,6 +79,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     setLoading(true);
     try {
       await api.updateImage(image.imageGUID, {
+        groupNumber: 0,
+        colorCode: 'none',
         reviewed: 'true',
       });
       onUpdate();
@@ -149,8 +148,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         return;
       }
 
-      // Number keys 1-8 for group selection
-      if (key >= '1' && key <= '8') {
+      // Number keys 0-8 for group selection
+      if (key >= '0' && key <= '8') {
         e.preventDefault();
         handleGroupSelect(parseInt(key));
         return;
@@ -163,8 +162,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         return;
       }
 
-      // Enter to approve (if group selected)
-      if (key === 'Enter' && groupNumber !== null) {
+      // Enter to approve
+      if (key === 'Enter') {
         e.preventDefault();
         handleApprove();
         return;
@@ -240,7 +239,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           </div>
 
           <div className="group-section">
-            <div className="group-label">Assign Group (1-8):</div>
+            <div className="group-label">Assign Group (0-8, 0=None/White):</div>
             <div className="group-buttons">
               {GROUP_COLORS.map((group) => (
                 <button
@@ -248,6 +247,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   className={`group-btn ${groupNumber === group.number ? 'selected' : ''}`}
                   style={{
                     '--group-color': group.color,
+                    '--group-text-color': group.textColor,
                   } as React.CSSProperties}
                   onClick={() => handleGroupSelect(group.number)}
                   disabled={loading}
@@ -262,7 +262,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           <div className="action-section">
             <button
               onClick={handleApprove}
-              disabled={loading || groupNumber === null}
+              disabled={loading}
               className="btn-approve"
               title="Approve (Enter)"
             >
@@ -288,7 +288,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
           <div className="keyboard-hints">
             <span>← → Navigate</span>
-            <span>1-8: Group</span>
+            <span>0-8: Group</span>
             <span>Enter: Approve</span>
             <span>R: Reject</span>
             <span>D: Delete</span>

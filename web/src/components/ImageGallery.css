@@ -10,6 +10,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -19,6 +21,45 @@
   margin: 0;
   font-size: 1.5rem;
   color: #fff;
+}
+
+/* Filter controls */
+.header-controls {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-group label {
+  color: #8892a6;
+  font-size: 0.85rem;
+}
+
+.filter-select {
+  background: #16213e;
+  color: #fff;
+  border: 1px solid #2a3a5a;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.filter-select:hover {
+  border-color: #3498db;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
 }
 
 .header-actions {
@@ -83,7 +124,7 @@
 }
 
 .gallery-item.processing {
-  opacity: 0.6;
+  opacity: 0.5;
   pointer-events: none;
 }
 
@@ -99,37 +140,43 @@
   display: block;
 }
 
-/* Quick action buttons overlay */
-.quick-actions {
+/* Quick action buttons overlay - FIXED */
+.quick-actions-overlay {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
-  gap: 0.35rem;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
   opacity: 0;
   transition: opacity 0.2s;
+  z-index: 10;
 }
 
-.gallery-item:hover .quick-actions {
+.gallery-item:hover .quick-actions-overlay {
   opacity: 1;
 }
 
 .quick-btn {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 6px;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
   border: none;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: transform 0.15s, background 0.15s;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .quick-btn:hover {
-  transform: scale(1.15);
+  transform: scale(1.2);
 }
 
 .quick-btn.approve {
@@ -196,6 +243,21 @@
   border-color: rgba(255, 255, 255, 0.5);
 }
 
+@media (max-width: 768px) {
+  .gallery-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-controls {
+    flex-wrap: wrap;
+  }
+
+  .filter-select {
+    min-width: 100px;
+  }
+}
+
 @media (max-width: 600px) {
   .gallery-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -203,8 +265,15 @@
     padding: 1rem;
   }
 
-  .quick-actions {
+  .quick-actions-overlay {
     opacity: 1;
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .quick-btn {
+    width: 2rem;
+    height: 2rem;
+    font-size: 0.9rem;
   }
 
   .group-btn-mini {

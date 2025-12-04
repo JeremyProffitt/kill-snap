@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import { api, ImageFilters } from '../services/api';
 import { authService } from '../services/auth';
 import { Image } from '../types';
 import { ImageModal } from './ImageModal';
@@ -10,15 +10,18 @@ interface ImageGalleryProps {
 }
 
 const GROUP_COLORS = [
-  { number: 1, color: '#e74c3c' },
-  { number: 2, color: '#3498db' },
-  { number: 3, color: '#2ecc71' },
-  { number: 4, color: '#f1c40f' },
-  { number: 5, color: '#9b59b6' },
-  { number: 6, color: '#e67e22' },
-  { number: 7, color: '#e91e63' },
-  { number: 8, color: '#795548' },
+  { number: 0, color: '#ffffff', name: 'None' },
+  { number: 1, color: '#e74c3c', name: 'Red' },
+  { number: 2, color: '#3498db', name: 'Blue' },
+  { number: 3, color: '#2ecc71', name: 'Green' },
+  { number: 4, color: '#f1c40f', name: 'Yellow' },
+  { number: 5, color: '#9b59b6', name: 'Purple' },
+  { number: 6, color: '#e67e22', name: 'Orange' },
+  { number: 7, color: '#e91e63', name: 'Pink' },
+  { number: 8, color: '#795548', name: 'Brown' },
 ];
+
+type StateFilter = 'unreviewed' | 'approved' | 'rejected' | 'all';
 
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [images, setImages] = useState<Image[]>([]);
@@ -26,11 +29,17 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [stateFilter, setStateFilter] = useState<StateFilter>('unreviewed');
+  const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
 
-  const loadImages = async () => {
+  const loadImages = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.getImages();
+      const filters: ImageFilters = {
+        state: stateFilter,
+        group: groupFilter,
+      };
+      const data = await api.getImages(filters);
       setImages(data);
       setError('');
     } catch (err: any) {
@@ -43,12 +52,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [stateFilter, groupFilter, onLogout]);
 
   useEffect(() => {
     loadImages();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadImages]);
 
   const handleImageClick = (index: number) => {
     setSelectedImageIndex(index);
@@ -60,13 +68,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   const handleImageUpdate = async () => {
     await loadImages();
-    // Keep modal open if there are still images, move to next or close
     if (selectedImageIndex !== null) {
-      const newImages = await api.getImages();
-      if (newImages.length === 0) {
+      if (images.length <= 1) {
         setSelectedImageIndex(null);
-      } else if (selectedImageIndex >= newImages.length) {
-        setSelectedImageIndex(newImages.length - 1);
+      } else if (selectedImageIndex >= images.length - 1) {
+        setSelectedImageIndex(Math.max(0, images.length - 2));
       }
     }
   };
@@ -80,58 +86,43 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   };
 
-  const handleQuickApprove = async (e: React.MouseEvent, image: Image, groupNumber: number) => {
+  const handleQuickAction = async (
+    e: React.MouseEvent,
+    image: Image,
+    action: 'approve' | 'reject' | 'delete',
+    groupNumber?: number
+  ) => {
     e.stopPropagation();
+    e.preventDefault();
     if (processingId) return;
 
-    setProcessingId(image.imageGUID);
-    try {
-      const group = GROUP_COLORS.find(g => g.number === groupNumber);
-      await api.updateImage(image.imageGUID, {
-        groupNumber,
-        colorCode: ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'brown'][groupNumber - 1],
-        promoted: false,
-        reviewed: 'true',
-      });
-      await loadImages();
-    } catch (err) {
-      console.error('Failed to approve image:', err);
-      alert('Failed to approve image');
-    } finally {
-      setProcessingId(null);
+    if (action === 'delete') {
+      if (!window.confirm('Delete this image?')) return;
     }
-  };
-
-  const handleQuickReject = async (e: React.MouseEvent, image: Image) => {
-    e.stopPropagation();
-    if (processingId) return;
 
     setProcessingId(image.imageGUID);
     try {
-      await api.updateImage(image.imageGUID, {
-        reviewed: 'true',
-      });
+      if (action === 'delete') {
+        await api.deleteImage(image.imageGUID);
+      } else if (action === 'approve' && groupNumber !== undefined) {
+        const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
+        await api.updateImage(image.imageGUID, {
+          groupNumber,
+          colorCode: colorName,
+          promoted: false,
+          reviewed: 'true',
+        });
+      } else if (action === 'reject') {
+        await api.updateImage(image.imageGUID, {
+          groupNumber: 0,
+          colorCode: 'white',
+          reviewed: 'true',
+        });
+      }
       await loadImages();
     } catch (err) {
-      console.error('Failed to reject image:', err);
-      alert('Failed to reject image');
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const handleQuickDelete = async (e: React.MouseEvent, image: Image) => {
-    e.stopPropagation();
-    if (processingId) return;
-    if (!window.confirm('Delete this image?')) return;
-
-    setProcessingId(image.imageGUID);
-    try {
-      await api.deleteImage(image.imageGUID);
-      await loadImages();
-    } catch (err) {
-      console.error('Failed to delete image:', err);
-      alert('Failed to delete image');
+      console.error(`Failed to ${action} image:`, err);
+      alert(`Failed to ${action} image`);
     } finally {
       setProcessingId(null);
     }
@@ -142,13 +133,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     onLogout();
   };
 
-  if (loading) {
-    return <div className="loading">Loading images...</div>;
-  }
-
-  if (error) {
-    return <div className="error-message">{error}</div>;
-  }
+  const getStateLabel = () => {
+    switch (stateFilter) {
+      case 'unreviewed': return 'unreviewed';
+      case 'approved': return 'approved';
+      case 'rejected': return 'rejected';
+      case 'all': return 'total';
+    }
+  };
 
   const selectedImage = selectedImageIndex !== null ? images[selectedImageIndex] : null;
 
@@ -156,17 +148,51 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     <div className="gallery-container">
       <header className="gallery-header">
         <h1>Image Review</h1>
+        <div className="header-controls">
+          <div className="filter-group">
+            <label>Status:</label>
+            <select
+              value={stateFilter}
+              onChange={(e) => setStateFilter(e.target.value as StateFilter)}
+              className="filter-select"
+            >
+              <option value="unreviewed">Unreviewed</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="all">All</option>
+            </select>
+          </div>
+          <div className="filter-group">
+            <label>Group:</label>
+            <select
+              value={groupFilter}
+              onChange={(e) => setGroupFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+              className="filter-select"
+            >
+              <option value="all">All Groups</option>
+              {GROUP_COLORS.map((group) => (
+                <option key={group.number} value={group.number}>
+                  {group.number}: {group.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         <div className="header-actions">
-          <span className="image-count">{images.length} unreviewed images</span>
+          <span className="image-count">{images.length} {getStateLabel()} images</span>
           <button onClick={handleLogout} className="logout-button">
             Logout
           </button>
         </div>
       </header>
 
-      {images.length === 0 ? (
+      {loading ? (
+        <div className="loading">Loading images...</div>
+      ) : error ? (
+        <div className="error-message">{error}</div>
+      ) : images.length === 0 ? (
         <div className="empty-state">
-          <p>No unreviewed images found</p>
+          <p>No {stateFilter === 'all' ? '' : stateFilter} images found</p>
         </div>
       ) : (
         <div className="gallery-grid">
@@ -182,24 +208,27 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   alt={image.originalFile}
                   className="thumbnail"
                 />
-                <div className="quick-actions">
+                <div className="quick-actions-overlay">
                   <button
+                    type="button"
                     className="quick-btn approve"
-                    onClick={(e) => handleQuickApprove(e, image, 1)}
+                    onClick={(e) => handleQuickAction(e, image, 'approve', 1)}
                     title="Quick Approve (Group 1)"
                   >
                     ✓
                   </button>
                   <button
+                    type="button"
                     className="quick-btn reject"
-                    onClick={(e) => handleQuickReject(e, image)}
+                    onClick={(e) => handleQuickAction(e, image, 'reject')}
                     title="Reject"
                   >
                     ✗
                   </button>
                   <button
+                    type="button"
                     className="quick-btn delete"
-                    onClick={(e) => handleQuickDelete(e, image)}
+                    onClick={(e) => handleQuickAction(e, image, 'delete')}
                     title="Delete"
                   >
                     🗑
@@ -211,13 +240,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   {image.width}×{image.height}
                 </div>
                 <div className="group-buttons-mini">
-                  {GROUP_COLORS.map((group) => (
+                  {GROUP_COLORS.slice(1).map((group) => (
                     <button
                       key={group.number}
+                      type="button"
                       className="group-btn-mini"
                       style={{ backgroundColor: group.color }}
-                      onClick={(e) => handleQuickApprove(e, image, group.number)}
-                      title={`Approve as Group ${group.number}`}
+                      onClick={(e) => handleQuickAction(e, image, 'approve', group.number)}
+                      title={`Approve as Group ${group.number} (${group.name})`}
                     >
                       {group.number}
                     </button>

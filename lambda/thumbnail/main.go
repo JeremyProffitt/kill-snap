@@ -160,12 +160,15 @@ func handler(ctx context.Context, s3Event events.S3Event) error {
 }
 
 func generateThumbnail(img image.Image, height int) (*bytes.Buffer, error) {
-	// Resize maintaining aspect ratio
+	// Resize maintaining aspect ratio using high-quality Lanczos resampling
 	thumbnail := imaging.Resize(img, 0, height, imaging.Lanczos)
 
-	// Encode to JPEG
+	// Apply mild sharpening to improve clarity after resize
+	thumbnail = imaging.Sharpen(thumbnail, 0.5)
+
+	// Encode to JPEG with high quality
 	buf := new(bytes.Buffer)
-	if err := jpeg.Encode(buf, thumbnail, &jpeg.Options{Quality: 90}); err != nil {
+	if err := jpeg.Encode(buf, thumbnail, &jpeg.Options{Quality: 92}); err != nil {
 		return nil, err
 	}
 

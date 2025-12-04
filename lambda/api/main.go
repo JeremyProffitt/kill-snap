@@ -233,17 +233,56 @@ func handleLogin(request events.APIGatewayProxyRequest, headers map[string]strin
 }
 
 func handleListImages(request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
-	// Query for unreviewed images using GSI
-	input := &dynamodb.QueryInput{
-		TableName:              aws.String(imageTable),
-		IndexName:              aws.String("ReviewedIndex"),
-		KeyConditionExpression: aws.String("Reviewed = :reviewed"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":reviewed": {S: aws.String("false")},
-		},
+	// Get filter parameters from query string
+	stateFilter := request.QueryStringParameters["state"]
+	groupFilter := request.QueryStringParameters["group"]
+
+	// Default to unreviewed if no state specified
+	if stateFilter == "" {
+		stateFilter = "unreviewed"
 	}
 
-	result, err := ddbClient.Query(input)
+	var result *dynamodb.QueryOutput
+	var err error
+
+	// Determine reviewed value based on state filter
+	switch stateFilter {
+	case "unreviewed":
+		// Query for unreviewed images using GSI
+		input := &dynamodb.QueryInput{
+			TableName:              aws.String(imageTable),
+			IndexName:              aws.String("ReviewedIndex"),
+			KeyConditionExpression: aws.String("Reviewed = :reviewed"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":reviewed": {S: aws.String("false")},
+			},
+		}
+		result, err = ddbClient.Query(input)
+	case "approved", "rejected":
+		// Query for reviewed images using GSI
+		input := &dynamodb.QueryInput{
+			TableName:              aws.String(imageTable),
+			IndexName:              aws.String("ReviewedIndex"),
+			KeyConditionExpression: aws.String("Reviewed = :reviewed"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":reviewed": {S: aws.String("true")},
+			},
+		}
+		result, err = ddbClient.Query(input)
+	case "all":
+		// Scan all images
+		scanResult, scanErr := ddbClient.Scan(&dynamodb.ScanInput{
+			TableName: aws.String(imageTable),
+		})
+		if scanErr != nil {
+			err = scanErr
+		} else {
+			result = &dynamodb.QueryOutput{Items: scanResult.Items}
+		}
+	default:
+		return errorResponse(400, "Invalid state filter", headers)
+	}
+
 	if err != nil {
 		fmt.Printf("Error querying images: %v\n", err)
 		return errorResponse(500, "Failed to list images", headers)
@@ -254,6 +293,24 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 	for _, item := range result.Items {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
+
+		// Filter by state (approved vs rejected)
+		if stateFilter == "approved" && img.GroupNumber == 0 {
+			continue // Skip rejected (no group assigned)
+		}
+		if stateFilter == "rejected" && img.GroupNumber > 0 {
+			continue // Skip approved (has group assigned)
+		}
+
+		// Filter by group if specified
+		if groupFilter != "" && groupFilter != "all" {
+			groupNum := 0
+			fmt.Sscanf(groupFilter, "%d", &groupNum)
+			if img.GroupNumber != groupNum {
+				continue
+			}
+		}
+
 		images = append(images, img)
 	}
 
@@ -276,14 +333,13 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 	exprAttrValues := make(map[string]*dynamodb.AttributeValue)
 	first := true
 
-	if updateReq.GroupNumber > 0 {
-		if !first {
-			updateExpr += ", "
-		}
-		updateExpr += "GroupNumber = :group"
-		exprAttrValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", updateReq.GroupNumber))}
-		first = false
+	// Always set GroupNumber (0 means rejected/no group)
+	if !first {
+		updateExpr += ", "
 	}
+	updateExpr += "GroupNumber = :group"
+	exprAttrValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", updateReq.GroupNumber))}
+	first = false
 
 	if updateReq.ColorCode != "" {
 		if !first {
