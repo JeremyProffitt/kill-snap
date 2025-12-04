@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
 import { Image, UpdateImageRequest } from '../types';
 
@@ -36,6 +36,10 @@ export const api = {
   },
 
   getImageUrl(bucket: string, key: string): string {
+    // Use CloudFront CDN URL if configured, otherwise fall back to S3 direct URL
+    if (IMAGE_CDN_URL) {
+      return `${IMAGE_CDN_URL}/${key}`;
+    }
     return `https://${bucket}.s3.amazonaws.com/${key}`;
   },
 };

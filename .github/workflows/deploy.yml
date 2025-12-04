@@ -312,9 +312,19 @@ jobs:
 
       - name: Build and deploy web frontend
         run: |
+          # Get CloudFormation outputs needed for frontend build
+          IMAGE_CDN_URL=$(aws cloudformation describe-stacks \
+            --stack-name kill-snap-svc \
+            --query 'Stacks[0].Outputs[?OutputKey==`ImageCDNUrl`].OutputValue' \
+            --output text)
+
+          echo "Image CDN URL: ${IMAGE_CDN_URL}"
+
           cd web
           npm install
-          npm run build
+
+          # Build with environment variables
+          REACT_APP_IMAGE_CDN_URL=${IMAGE_CDN_URL} npm run build
 
           # Get website bucket name from CloudFormation outputs
           WEBSITE_BUCKET=$(aws cloudformation describe-stacks \

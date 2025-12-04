@@ -343,6 +343,59 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
+  # CloudFront OAC for Image Bucket (always created, not dependent on custom domain)
+  ImageBucketOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-ImageBucket-OAC
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront Distribution for Image Bucket (always created for image serving)
+  ImageCDN:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        Comment: !Sub "Image CDN for ${S3BucketName}"
+        Origins:
+          - Id: ImageBucketOrigin
+            DomainName: !Sub ${S3BucketName}.s3.${AWS::Region}.amazonaws.com
+            OriginAccessControlId: !Ref ImageBucketOAC
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: ImageBucketOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized managed policy
+        PriceClass: PriceClass_100
+
+  # Bucket Policy for Image Bucket to allow CloudFront access
+  ImageBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketName
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${S3BucketName}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${ImageCDN}
+
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref DomainName, 'DISABLED']]
   HasHostedZone: !Not [!Equals [!Ref HostedZoneId, 'DISABLED']]
@@ -396,3 +449,7 @@ Outputs:
   ApiLambdaArn:
     Description: API Lambda Function ARN
     Value: !GetAtt ApiFunction.Arn
+
+  ImageCDNUrl:
+    Description: CloudFront URL for serving images
+    Value: !Sub https://${ImageCDN.DomainName}
