@@ -7,6 +7,11 @@ interface ImageModalProps {
   image: Image;
   onClose: () => void;
   onUpdate: () => void;
+  onNavigate: (direction: 'prev' | 'next') => void;
+  hasPrev: boolean;
+  hasNext: boolean;
+  currentIndex: number;
+  totalImages: number;
 }
 
 const GROUP_COLORS = [
@@ -32,9 +37,23 @@ const getFilename = (path: string): string => {
   return parts[parts.length - 1];
 };
 
-export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate }) => {
+export const ImageModal: React.FC<ImageModalProps> = ({
+  image,
+  onClose,
+  onUpdate,
+  onNavigate,
+  hasPrev,
+  hasNext,
+  currentIndex,
+  totalImages,
+}) => {
   const [groupNumber, setGroupNumber] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Reset group selection when image changes
+  useEffect(() => {
+    setGroupNumber(null);
+  }, [image.imageGUID]);
 
   const handleApprove = useCallback(async () => {
     if (groupNumber === null) {
@@ -96,6 +115,18 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
     }
   }, [loading]);
 
+  const handlePrev = useCallback(() => {
+    if (hasPrev && !loading) {
+      onNavigate('prev');
+    }
+  }, [hasPrev, loading, onNavigate]);
+
+  const handleNext = useCallback(() => {
+    if (hasNext && !loading) {
+      onNavigate('next');
+    }
+  }, [hasNext, loading, onNavigate]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -105,6 +136,18 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
       }
 
       const key = e.key;
+
+      // Arrow keys for navigation
+      if (key === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrev();
+        return;
+      }
+      if (key === 'ArrowRight') {
+        e.preventDefault();
+        handleNext();
+        return;
+      }
 
       // Number keys 1-8 for group selection
       if (key >= '1' && key <= '8') {
@@ -144,7 +187,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, onClose, groupNumber]);
+  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handlePrev, handleNext, onClose, groupNumber]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -154,12 +197,26 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
 
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
+      {/* Left Navigation Arrow */}
+      <button
+        className={`nav-arrow nav-prev ${!hasPrev ? 'disabled' : ''}`}
+        onClick={handlePrev}
+        disabled={!hasPrev || loading}
+        title="Previous (←)"
+      >
+        ‹
+      </button>
+
       <div className="modal-content">
         <button className="close-button" onClick={onClose} disabled={loading}>
           ×
         </button>
 
         <div className="modal-body">
+          <div className="image-counter">
+            {currentIndex + 1} / {totalImages}
+          </div>
+
           <div className="image-preview">
             <img
               src={api.getImageUrl(image.bucket, image.thumbnail400)}
@@ -230,7 +287,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
           </div>
 
           <div className="keyboard-hints">
-            <span>1-8: Select group</span>
+            <span>← → Navigate</span>
+            <span>1-8: Group</span>
             <span>Enter: Approve</span>
             <span>R: Reject</span>
             <span>D: Delete</span>
@@ -238,6 +296,16 @@ export const ImageModal: React.FC<ImageModalProps> = ({ image, onClose, onUpdate
           </div>
         </div>
       </div>
+
+      {/* Right Navigation Arrow */}
+      <button
+        className={`nav-arrow nav-next ${!hasNext ? 'disabled' : ''}`}
+        onClick={handleNext}
+        disabled={!hasNext || loading}
+        title="Next (→)"
+      >
+        ›
+      </button>
     </div>
   );
 };

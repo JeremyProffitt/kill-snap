@@ -97,10 +97,10 @@ func handler(ctx context.Context, s3Event events.S3Event) error {
 		exifData := extractEXIF(bytes.NewReader(exifBuf.Bytes()))
 		result.Body.Close()
 
-		// Generate thumbnails
-		thumbnail50, err := generateThumbnail(img, 50)
+		// Generate thumbnails (150px for gallery grid, 400px for modal preview)
+		thumbnail50, err := generateThumbnail(img, 150)
 		if err != nil {
-			return fmt.Errorf("failed to generate 50px thumbnail: %v", err)
+			return fmt.Errorf("failed to generate 150px thumbnail: %v", err)
 		}
 
 		thumbnail400, err := generateThumbnail(img, 400)

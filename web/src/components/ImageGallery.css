@@ -63,7 +63,7 @@
 
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 1.25rem;
   padding: 2rem;
 }
@@ -78,8 +78,18 @@
 }
 
 .gallery-item:hover {
-  transform: translateY(-6px);
+  transform: translateY(-4px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.gallery-item.processing {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.thumbnail-container {
+  position: relative;
+  overflow: hidden;
 }
 
 .thumbnail {
@@ -89,13 +99,117 @@
   display: block;
 }
 
+/* Quick action buttons overlay */
+.quick-actions {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.35rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.gallery-item:hover .quick-actions {
+  opacity: 1;
+}
+
+.quick-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, background 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.quick-btn:hover {
+  transform: scale(1.15);
+}
+
+.quick-btn.approve {
+  background: #2ecc71;
+  color: white;
+}
+
+.quick-btn.approve:hover {
+  background: #27ae60;
+}
+
+.quick-btn.reject {
+  background: #6c757d;
+  color: white;
+}
+
+.quick-btn.reject:hover {
+  background: #5a6268;
+}
+
+.quick-btn.delete {
+  background: #e74c3c;
+  color: white;
+}
+
+.quick-btn.delete:hover {
+  background: #c0392b;
+}
+
 .image-info {
-  padding: 0.75rem;
+  padding: 0.6rem;
   background: #16213e;
 }
 
 .image-dimensions {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #8892a6;
   text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+/* Mini group buttons */
+.group-buttons-mini {
+  display: flex;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.group-btn-mini {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.group-btn-mini:hover {
+  transform: scale(1.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+@media (max-width: 600px) {
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+
+  .quick-actions {
+    opacity: 1;
+  }
+
+  .group-btn-mini {
+    width: 1.4rem;
+    height: 1.4rem;
+    font-size: 0.65rem;
+  }
 }
