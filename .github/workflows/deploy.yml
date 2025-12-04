@@ -50,10 +50,13 @@ jobs:
             echo "Image bucket ${IMAGE_BUCKET} already exists"
           else
             echo "Creating image bucket: ${IMAGE_BUCKET}"
-            aws s3api create-bucket \
-              --bucket "${IMAGE_BUCKET}" \
-              --region ${AWS_REGION} \
-              --create-bucket-configuration LocationConstraint=${AWS_REGION}
+            # us-east-1 doesn't use LocationConstraint
+            if [ "${AWS_REGION}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "${IMAGE_BUCKET}" --region ${AWS_REGION}
+            else
+              aws s3api create-bucket --bucket "${IMAGE_BUCKET}" --region ${AWS_REGION} \
+                --create-bucket-configuration LocationConstraint=${AWS_REGION}
+            fi
 
             # Enable versioning on image bucket
             aws s3api put-bucket-versioning \
@@ -68,10 +71,13 @@ jobs:
             echo "Website bucket ${WEBSITE_BUCKET} already exists"
           else
             echo "Creating website bucket: ${WEBSITE_BUCKET}"
-            aws s3api create-bucket \
-              --bucket "${WEBSITE_BUCKET}" \
-              --region ${AWS_REGION} \
-              --create-bucket-configuration LocationConstraint=${AWS_REGION}
+            # us-east-1 doesn't use LocationConstraint
+            if [ "${AWS_REGION}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "${WEBSITE_BUCKET}" --region ${AWS_REGION}
+            else
+              aws s3api create-bucket --bucket "${WEBSITE_BUCKET}" --region ${AWS_REGION} \
+                --create-bucket-configuration LocationConstraint=${AWS_REGION}
+            fi
 
             echo "Website bucket created"
           fi
@@ -274,21 +280,29 @@ jobs:
             --source-arn arn:aws:s3:::${IMAGE_BUCKET} \
             || echo "Permission may already exist"
 
-          # Configure S3 bucket notification
+          # Configure S3 bucket notification for both .jpg and .JPG extensions
           cat > /tmp/notification.json <<EOF
           {
-            "LambdaFunctionConfigurations": [{
-              "LambdaFunctionArn": "${LAMBDA_ARN}",
-              "Events": ["s3:ObjectCreated:*"],
-              "Filter": {
-                "Key": {
-                  "FilterRules": [{
-                    "Name": "suffix",
-                    "Value": ".jpg"
-                  }]
+            "LambdaFunctionConfigurations": [
+              {
+                "LambdaFunctionArn": "${LAMBDA_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {
+                  "Key": {
+                    "FilterRules": [{"Name": "suffix", "Value": ".jpg"}]
+                  }
+                }
+              },
+              {
+                "LambdaFunctionArn": "${LAMBDA_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": {
+                  "Key": {
+                    "FilterRules": [{"Name": "suffix", "Value": ".JPG"}]
+                  }
                 }
               }
-            }]
+            ]
           }
           EOF
 
