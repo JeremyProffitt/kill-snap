@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Project } from '../types';
+import { Project, ZipFile } from '../types';
 import './ProjectModal.css';
 
 interface ProjectModalProps {
@@ -18,6 +18,16 @@ const GROUP_COLORS = [
   { number: 5, color: '#9b59b6', name: 'Purple' },
 ];
 
+const formatFileSize = (bytes: number): string => {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / 1024).toFixed(1)} KB`;
+};
+
 export const ProjectModal: React.FC<ProjectModalProps> = ({
   onClose,
   onProjectCreated,
@@ -29,6 +39,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [imageFilter, setImageFilter] = useState<'all' | number>('all');
   const [loading, setLoading] = useState(false);
   const [downloadingProject, setDownloadingProject] = useState<string | null>(null);
+  const [generatingZip, setGeneratingZip] = useState<string | null>(null);
+  const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
@@ -110,6 +122,49 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setResult({ success: false, message: errorMsg });
     } finally {
       setDownloadingProject(null);
+    }
+  };
+
+  const handleGenerateZip = async (project: Project) => {
+    setGeneratingZip(project.projectId);
+    setResult(null);
+    try {
+      await api.generateZip(project.projectId);
+      setResult({
+        success: true,
+        message: `Zip generation started for "${project.name}". This may take several minutes.`
+      });
+      onProjectCreated(); // Refresh projects to see updated status
+    } catch (err: any) {
+      console.error('Failed to generate zip:', err);
+      const errorMsg = err.response?.data?.error || 'Failed to start zip generation';
+      setResult({ success: false, message: errorMsg });
+    } finally {
+      setGeneratingZip(null);
+    }
+  };
+
+  const handleDownloadZip = async (project: Project, zipFile: ZipFile) => {
+    const zipId = `${project.projectId}-${zipFile.key}`;
+    setDownloadingZip(zipId);
+    setResult(null);
+    try {
+      const response = await api.getZipDownload(project.projectId, zipFile.key);
+      const link = document.createElement('a');
+      link.href = response.url;
+      link.download = response.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setResult({
+        success: true,
+        message: `Downloading ${response.filename}`
+      });
+    } catch (err: any) {
+      console.error('Failed to download zip:', err);
+      setResult({ success: false, message: 'Failed to download zip file' });
+    } finally {
+      setDownloadingZip(null);
     }
   };
 
@@ -213,25 +268,65 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           <div className="existing-projects">
             <h3>Existing Projects</h3>
             <ul>
-              {existingProjects.map((project) => (
-                <li key={project.projectId}>
-                  <div className="project-info">
-                    <span className="project-name">{project.name}</span>
-                    <span className="project-count">{project.imageCount} images</span>
-                    <span className="project-date">
-                      Created: {new Date(project.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <button
-                    className="download-catalog-btn"
-                    onClick={() => handleDownloadCatalog(project)}
-                    disabled={downloadingProject === project.projectId || project.imageCount === 0}
-                    title={project.imageCount === 0 ? 'No images in project' : 'Download Lightroom Catalog'}
-                  >
-                    {downloadingProject === project.projectId ? 'Downloading...' : 'Download .lrcat'}
-                  </button>
-                </li>
-              ))}
+              {existingProjects.map((project) => {
+                const isGenerating = project.zipFiles?.some(z => z.status === 'generating');
+                const completedZips = project.zipFiles?.filter(z => z.status === 'complete') || [];
+
+                return (
+                  <li key={project.projectId} className="project-item">
+                    <div className="project-info">
+                      <span className="project-name">{project.name}</span>
+                      <div className="project-meta">
+                        <span className="project-count">{project.imageCount} images</span>
+                        <span className="project-date">
+                          Created: {new Date(project.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="project-actions">
+                      <button
+                        className="download-catalog-btn"
+                        onClick={() => handleDownloadCatalog(project)}
+                        disabled={downloadingProject === project.projectId || project.imageCount === 0}
+                        title={project.imageCount === 0 ? 'No images in project' : 'Download Lightroom Classic Catalog'}
+                      >
+                        {downloadingProject === project.projectId ? 'Downloading...' : 'Download Lightroom Classic Catalog'}
+                      </button>
+                      <button
+                        className="generate-zip-btn"
+                        onClick={() => handleGenerateZip(project)}
+                        disabled={generatingZip === project.projectId || isGenerating || project.imageCount === 0}
+                        title={project.imageCount === 0 ? 'No images in project' : 'Generate ZIP file of original images'}
+                      >
+                        {generatingZip === project.projectId || isGenerating ? 'Generating...' : 'Generate ZIP'}
+                      </button>
+                    </div>
+                    {completedZips.length > 0 && (
+                      <div className="zip-files-list">
+                        <span className="zip-files-label">ZIP Files:</span>
+                        {completedZips.map((zipFile) => {
+                          const zipId = `${project.projectId}-${zipFile.key}`;
+                          const filename = zipFile.key.split('/').pop() || 'download.zip';
+                          return (
+                            <div key={zipFile.key} className="zip-file-item">
+                              <span className="zip-file-info">
+                                {filename} ({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
+                              </span>
+                              <button
+                                className="download-zip-btn"
+                                onClick={() => handleDownloadZip(project, zipFile)}
+                                disabled={downloadingZip === zipId}
+                              >
+                                {downloadingZip === zipId ? 'Downloading...' : 'Download'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}

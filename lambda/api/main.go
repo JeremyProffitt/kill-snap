@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ var (
 	adminPassword     string
 	functionName      string
 	openaiAPIKey      string
+	zipLambdaName     string
 	jwtSecret         = []byte("kill-snap-secret-key-change-in-production")
 )
 
@@ -59,6 +61,7 @@ func init() {
 	adminPassword = os.Getenv("ADMIN_PASSWORD")
 	functionName = os.Getenv("AWS_LAMBDA_FUNCTION_NAME")
 	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+	zipLambdaName = os.Getenv("ZIP_LAMBDA_NAME")
 
 	// Initialize admin user if it doesn't exist
 	if adminUsername != "" && adminPassword != "" {
@@ -110,13 +113,24 @@ type UpdateImageRequest struct {
 }
 
 type Project struct {
-	ProjectID        string   `json:"projectId" dynamodbav:"ProjectID"`
-	Name             string   `json:"name" dynamodbav:"Name"`
-	CreatedAt        string   `json:"createdAt" dynamodbav:"CreatedAt"`
-	ImageCount       int      `json:"imageCount" dynamodbav:"ImageCount"`
-	CatalogPath      string   `json:"catalogPath,omitempty" dynamodbav:"CatalogPath,omitempty"`
-	CatalogUpdatedAt string   `json:"catalogUpdatedAt,omitempty" dynamodbav:"CatalogUpdatedAt,omitempty"`
-	Keywords         []string `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
+	ProjectID        string    `json:"projectId" dynamodbav:"ProjectID"`
+	Name             string    `json:"name" dynamodbav:"Name"`
+	S3Prefix         string    `json:"s3Prefix,omitempty" dynamodbav:"S3Prefix,omitempty"`
+	CreatedAt        string    `json:"createdAt" dynamodbav:"CreatedAt"`
+	ImageCount       int       `json:"imageCount" dynamodbav:"ImageCount"`
+	CatalogPath      string    `json:"catalogPath,omitempty" dynamodbav:"CatalogPath,omitempty"`
+	CatalogUpdatedAt string    `json:"catalogUpdatedAt,omitempty" dynamodbav:"CatalogUpdatedAt,omitempty"`
+	Keywords         []string  `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
+	ZipFiles         []ZipFile `json:"zipFiles,omitempty" dynamodbav:"ZipFiles,omitempty"`
+}
+
+// ZipFile represents a generated zip file for a project
+type ZipFile struct {
+	Key        string `json:"key" dynamodbav:"Key"`
+	Size       int64  `json:"size" dynamodbav:"Size"`
+	ImageCount int    `json:"imageCount" dynamodbav:"ImageCount"`
+	CreatedAt  string `json:"createdAt" dynamodbav:"CreatedAt"`
+	Status     string `json:"status" dynamodbav:"Status"` // "generating", "complete", "failed"
 }
 
 type CreateProjectRequest struct {
@@ -259,6 +273,50 @@ func getImageDate(img ImageResponse) time.Time {
 // buildDatePath returns YYYY/MM/DD format
 func buildDatePath(t time.Time) string {
 	return fmt.Sprintf("%d/%02d/%02d", t.Year(), int(t.Month()), t.Day())
+}
+
+// sanitizeS3Name converts a project name to an S3-safe prefix
+// Rules: lowercase, alphanumeric + hyphens, no consecutive hyphens, max 63 chars
+func sanitizeS3Name(name string) string {
+	// Convert to lowercase
+	result := strings.ToLower(name)
+
+	// Replace spaces and underscores with hyphens
+	result = strings.ReplaceAll(result, " ", "-")
+	result = strings.ReplaceAll(result, "_", "-")
+
+	// Remove any character that's not alphanumeric or hyphen
+	reg := regexp.MustCompile(`[^a-z0-9-]`)
+	result = reg.ReplaceAllString(result, "")
+
+	// Replace multiple consecutive hyphens with single hyphen
+	reg = regexp.MustCompile(`-+`)
+	result = reg.ReplaceAllString(result, "-")
+
+	// Trim leading/trailing hyphens
+	result = strings.Trim(result, "-")
+
+	// Limit to 63 characters (S3 prefix component limit)
+	if len(result) > 63 {
+		result = result[:63]
+		result = strings.TrimRight(result, "-")
+	}
+
+	// Ensure we have something
+	if result == "" {
+		result = "project"
+	}
+
+	return result
+}
+
+// getProjectS3Prefix returns the S3 prefix for a project, preferring S3Prefix if set
+func getProjectS3Prefix(project Project) string {
+	if project.S3Prefix != "" {
+		return project.S3Prefix
+	}
+	// Fallback to ProjectID for backward compatibility
+	return project.ProjectID
 }
 
 // moveImageFiles moves original, thumbnails, and related files to new location
@@ -782,8 +840,9 @@ func generateProjectCatalog(project Project, images []ImageResponse) error {
 		return fmt.Errorf("failed to read catalog: %v", err)
 	}
 
-	// Upload to S3 at projects/<projectId>/project.lrcat (use ID for safe paths)
-	s3Key := fmt.Sprintf("projects/%s/project.lrcat", project.ProjectID)
+	// Upload to S3 at projects/<s3Prefix>/project.lrcat (use sanitized name)
+	s3Prefix := getProjectS3Prefix(project)
+	s3Key := fmt.Sprintf("projects/%s/project.lrcat", s3Prefix)
 	_, err = s3Client.PutObject(&s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(s3Key),
@@ -885,6 +944,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/images/") && strings.HasSuffix(path, "/download") && method == "GET":
 		imageID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/images/"), "/download")
 		return handleDownload(imageID, headers)
+	case strings.HasPrefix(path, "/api/images/") && strings.HasSuffix(path, "/regenerate-ai") && method == "POST":
+		imageID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/images/"), "/regenerate-ai")
+		return handleRegenerateAI(imageID, headers)
 	case strings.HasPrefix(path, "/api/images/") && method == "DELETE":
 		imageID := strings.TrimPrefix(path, "/api/images/")
 		return handleDeleteImage(imageID, headers)
@@ -905,6 +967,18 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/catalog") && method == "GET":
 		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/catalog")
 		return handleGetProjectCatalog(projectID, headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/generate-zip") && method == "POST":
+		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/generate-zip")
+		return handleGenerateZip(projectID, headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.Contains(path, "/zips/") && strings.HasSuffix(path, "/download") && method == "GET":
+		// Extract projectID and zipKey from path: /api/projects/{projectId}/zips/{zipKey}/download
+		parts := strings.Split(path, "/")
+		if len(parts) >= 7 {
+			projectID := parts[3]
+			zipKey := strings.Join(parts[5:len(parts)-1], "/")
+			return handleGetZipDownload(projectID, zipKey, headers)
+		}
+		return errorResponse(400, "Invalid zip download path", headers)
 	default:
 		return errorResponse(404, "Not found", headers)
 	}
@@ -1192,6 +1266,96 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 	}, nil
 }
 
+func handleRegenerateAI(imageID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Check if OpenAI API key is configured
+	if openaiAPIKey == "" {
+		return errorResponse(400, "AI content generation is not configured", headers)
+	}
+
+	// Get image metadata
+	result, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageID)},
+		},
+	})
+
+	if err != nil || result.Item == nil {
+		return errorResponse(404, "Image not found", headers)
+	}
+
+	var img ImageResponse
+	dynamodbattribute.UnmarshalMap(result.Item, &img)
+
+	// Call GPT-4o to analyze the image
+	aiResult, err := analyzeImageWithGPT4o(img.Bucket, img.Thumbnail400)
+	if err != nil {
+		fmt.Printf("Error analyzing image with GPT-4o: %v\n", err)
+		return errorResponse(500, fmt.Sprintf("Failed to analyze image: %v", err), headers)
+	}
+
+	// Merge AI keywords with existing user keywords (case-insensitive deduplication)
+	existingKeywordsLower := make(map[string]bool)
+	for _, kw := range img.Keywords {
+		existingKeywordsLower[strings.ToLower(kw)] = true
+	}
+
+	mergedKeywords := append([]string{}, img.Keywords...) // Start with existing
+	for _, kw := range aiResult.Keywords {
+		if !existingKeywordsLower[strings.ToLower(kw)] {
+			mergedKeywords = append(mergedKeywords, kw)
+			existingKeywordsLower[strings.ToLower(kw)] = true
+		}
+	}
+
+	// Build update expression for keywords and description
+	updateExpr := "SET UpdatedDateTime = :updated"
+	exprAttrValues := map[string]*dynamodb.AttributeValue{
+		":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+	}
+
+	if len(mergedKeywords) > 0 {
+		keywordsList := make([]*dynamodb.AttributeValue, len(mergedKeywords))
+		for i, kw := range mergedKeywords {
+			keywordsList[i] = &dynamodb.AttributeValue{S: aws.String(kw)}
+		}
+		updateExpr += ", Keywords = :keywords"
+		exprAttrValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
+	}
+
+	if aiResult.Description != "" {
+		updateExpr += ", Description = :description"
+		exprAttrValues[":description"] = &dynamodb.AttributeValue{S: aws.String(aiResult.Description)}
+	}
+
+	// Update the image in DynamoDB
+	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageID)},
+		},
+		UpdateExpression:          aws.String(updateExpr),
+		ExpressionAttributeValues: exprAttrValues,
+	})
+	if err != nil {
+		fmt.Printf("Error updating image with AI content: %v\n", err)
+		return errorResponse(500, "Failed to save AI content", headers)
+	}
+
+	// Return the updated content
+	response := map[string]interface{}{
+		"success":     true,
+		"keywords":    mergedKeywords,
+		"description": aiResult.Description,
+	}
+	body, _ := json.Marshal(response)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
 func handleDownload(imageID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
 	// Get image metadata
 	result, err := ddbClient.GetItem(&dynamodb.GetItemInput{
@@ -1322,9 +1486,13 @@ func handleCreateProject(request events.APIGatewayProxyRequest, headers map[stri
 		return errorResponse(400, "Project name is required", headers)
 	}
 
+	// Generate S3-safe prefix from project name
+	s3Prefix := sanitizeS3Name(req.Name)
+
 	project := Project{
 		ProjectID:  uuid.New().String(),
 		Name:       req.Name,
+		S3Prefix:   s3Prefix,
 		CreatedAt:  time.Now().Format(time.RFC3339),
 		ImageCount: 0,
 		Keywords:   req.Keywords,
@@ -1345,7 +1513,7 @@ func handleCreateProject(request events.APIGatewayProxyRequest, headers map[stri
 		fmt.Printf("Warning: failed to generate initial catalog: %v\n", err)
 		// Don't fail project creation if catalog generation fails
 	} else {
-		project.CatalogPath = fmt.Sprintf("projects/%s/project.lrcat", project.ProjectID)
+		project.CatalogPath = fmt.Sprintf("projects/%s/project.lrcat", s3Prefix)
 		project.CatalogUpdatedAt = time.Now().Format(time.RFC3339)
 	}
 
@@ -1483,7 +1651,8 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		return errorResponse(500, "Failed to query images", headers)
 	}
 
-	// Move each image to project folder
+	// Move each image to project folder using sanitized S3 prefix
+	s3Prefix := getProjectS3Prefix(project)
 	movedCount := 0
 	for _, item := range result.Items {
 		var img ImageResponse
@@ -1491,7 +1660,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 
 		imageDate := getImageDate(img)
 		datePath := buildDatePath(imageDate)
-		destPrefix := fmt.Sprintf("projects/%s/%s", project.ProjectID, datePath)
+		destPrefix := fmt.Sprintf("projects/%s/%s", s3Prefix, datePath)
 
 		newPaths, err := moveImageFiles(bucketName, img, destPrefix)
 		if err != nil {
@@ -1637,6 +1806,131 @@ func handleGetProjectCatalog(projectID string, headers map[string]string) (event
 		"url":       url,
 		"filename":  project.Name + ".lrcat",
 		"updatedAt": project.CatalogUpdatedAt,
+	})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleGenerateZip(projectID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	if zipLambdaName == "" {
+		return errorResponse(500, "Zip generation not configured", headers)
+	}
+
+	// Get project to verify it exists and has images
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	if project.ImageCount == 0 {
+		return errorResponse(400, "Project has no images to zip", headers)
+	}
+
+	// Mark as generating by adding a placeholder zip entry
+	placeholderZip := ZipFile{
+		Key:        "generating",
+		Size:       0,
+		ImageCount: project.ImageCount,
+		CreatedAt:  time.Now().Format(time.RFC3339),
+		Status:     "generating",
+	}
+
+	zipFilesList, _ := dynamodbattribute.MarshalList([]ZipFile{placeholderZip})
+	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+		UpdateExpression: aws.String("SET ZipFiles = :zips"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":zips": {L: zipFilesList},
+		},
+	})
+	if err != nil {
+		fmt.Printf("Error setting zip status: %v\n", err)
+	}
+
+	// Invoke the zip Lambda asynchronously
+	payload, _ := json.Marshal(map[string]string{"projectId": projectID})
+
+	_, err = lambdaClient.Invoke(&lambdasvc.InvokeInput{
+		FunctionName:   aws.String(zipLambdaName),
+		InvocationType: aws.String("Event"), // Async invocation
+		Payload:        payload,
+	})
+	if err != nil {
+		fmt.Printf("Error invoking zip lambda: %v\n", err)
+		return errorResponse(500, "Failed to start zip generation", headers)
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"message": "Zip generation started",
+	})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleGetZipDownload(projectID string, zipKey string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Get project to verify the zip exists
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	// Find the zip file in the project's zip files list
+	var targetZip *ZipFile
+	for _, zf := range project.ZipFiles {
+		// The zipKey in the request might be URL-encoded, so we need to match the base filename
+		if strings.HasSuffix(zf.Key, zipKey) || zf.Key == zipKey {
+			targetZip = &zf
+			break
+		}
+	}
+
+	if targetZip == nil || targetZip.Status != "complete" {
+		return errorResponse(404, "Zip file not found or not ready", headers)
+	}
+
+	// Generate presigned URL for download
+	filename := targetZip.Key[strings.LastIndex(targetZip.Key, "/")+1:]
+	req, _ := s3Client.GetObjectRequest(&s3.GetObjectInput{
+		Bucket:                     aws.String(bucketName),
+		Key:                        aws.String(targetZip.Key),
+		ResponseContentDisposition: aws.String(fmt.Sprintf("attachment; filename=\"%s\"", filename)),
+	})
+
+	url, err := req.Presign(60 * time.Minute) // 1 hour for large downloads
+	if err != nil {
+		return errorResponse(500, "Failed to generate download URL", headers)
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"url":      url,
+		"filename": filename,
+		"size":     targetZip.Size,
 	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,

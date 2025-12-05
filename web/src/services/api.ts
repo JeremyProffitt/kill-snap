@@ -100,4 +100,29 @@ export const api = {
     );
     return response.data;
   },
+
+  async regenerateAI(imageId: string): Promise<{ keywords: string[]; description: string }> {
+    const response = await axios.post<{ success: boolean; keywords: string[]; description: string }>(
+      `${API_BASE_URL}/api/images/${imageId}/regenerate-ai`,
+      {},
+      { headers: authService.getAuthHeader() }
+    );
+    return { keywords: response.data.keywords, description: response.data.description };
+  },
+
+  async generateZip(projectId: string): Promise<void> {
+    await axios.post(
+      `${API_BASE_URL}/api/projects/${projectId}/generate-zip`,
+      {},
+      { headers: authService.getAuthHeader() }
+    );
+  },
+
+  async getZipDownload(projectId: string, zipKey: string): Promise<{ url: string; filename: string; size: number }> {
+    const response = await axios.get<{ url: string; filename: string; size: number }>(
+      `${API_BASE_URL}/api/projects/${projectId}/zips/${encodeURIComponent(zipKey)}/download`,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
 };

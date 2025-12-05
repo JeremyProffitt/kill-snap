@@ -112,6 +112,16 @@ jobs:
                 "Expiration": {
                   "Days": 365
                 }
+              },
+              {
+                "ID": "DeleteProjectZipsAfter30Days",
+                "Filter": {
+                  "Prefix": "project-zips/"
+                },
+                "Status": "Enabled",
+                "Expiration": {
+                  "Days": 30
+                }
               }
             ]
           }
@@ -124,6 +134,7 @@ jobs:
           echo "S3 lifecycle policies configured:"
           echo "  - deleted/ folder: 90-day expiration"
           echo "  - rejected/ folder: 365-day expiration"
+          echo "  - project-zips/ folder: 30-day expiration"
 
       - name: Build SAM application
         run: |

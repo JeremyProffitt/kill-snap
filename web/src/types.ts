@@ -42,10 +42,20 @@ export interface UpdateImageRequest {
 export interface Project {
   projectId: string;
   name: string;
+  s3Prefix?: string;
   createdAt: string;
   imageCount: number;
   catalogPath?: string;
   catalogUpdatedAt?: string;
+  zipFiles?: ZipFile[];
+}
+
+export interface ZipFile {
+  key: string;
+  size: number;
+  imageCount: number;
+  createdAt: string;
+  status: 'generating' | 'complete' | 'failed';
 }
 
 export interface CatalogDownloadResponse {

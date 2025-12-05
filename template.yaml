@@ -177,6 +177,46 @@ Resources:
                 - dynamodb:Scan
               Resource: !GetAtt ImageMetadataTable.Arn
 
+  # Lambda function for project zip generation
+  ZipGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: ProjectZipGenerator
+      Runtime: provided.al2023
+      CodeUri: lambda/zip/
+      Handler: bootstrap
+      MemorySize: 1024
+      Timeout: 900  # 15 minutes for large zip generation
+      EphemeralStorage:
+        Size: 10240  # 10GB ephemeral storage for temp zip files
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref S3BucketName
+          IMAGE_TABLE: !Ref ImageMetadataTable
+          PROJECT_TABLE: !Ref ProjectsTable
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+                - !Sub 'arn:aws:s3:::${S3BucketName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt ImageMetadataTable.Arn
+                - !Sub ${ImageMetadataTable.Arn}/index/*
+                - !GetAtt ProjectsTable.Arn
+
   # API Gateway REST API
   ImageReviewApi:
     Type: AWS::Serverless::Api
@@ -209,6 +249,7 @@ Resources:
           ADMIN_USERNAME: !Ref AdminUsername
           ADMIN_PASSWORD: !Ref AdminPassword
           OPENAI_API_KEY: !Ref OpenAIApiKey
+          ZIP_LAMBDA_NAME: !Ref ZipGeneratorFunction
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -238,7 +279,9 @@ Resources:
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ImageReviewApi'
+              Resource:
+                - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ImageReviewApi'
+                - !GetAtt ZipGeneratorFunction.Arn
       Events:
         Login:
           Type: Api
@@ -300,6 +343,24 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/projects/{projectId}/catalog
             Method: GET
+        GenerateZip:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/generate-zip
+            Method: POST
+        GetZipDownload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/zips/{zipKey}/download
+            Method: GET
+        RegenerateAI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/images/{imageId}/regenerate-ai
+            Method: POST
 
   # CloudFront Origin Access Control
   CloudFrontOAC:
@@ -532,6 +593,10 @@ Outputs:
   ApiLambdaArn:
     Description: API Lambda Function ARN
     Value: !GetAtt ApiFunction.Arn
+
+  ZipGeneratorLambdaArn:
+    Description: Zip Generator Lambda Function ARN
+    Value: !GetAtt ZipGeneratorFunction.Arn
 
   ImageCDNUrl:
     Description: CloudFront URL for serving images

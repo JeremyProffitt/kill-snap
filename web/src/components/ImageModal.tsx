@@ -51,14 +51,17 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [regeneratingAI, setRegeneratingAI] = useState(false);
+  const [description, setDescription] = useState<string>('');
 
-  // Reset group, rating, and keywords when image changes
+  // Reset group, rating, keywords, and description when image changes
   useEffect(() => {
     setGroupNumber(image.groupNumber || 0);
     setRating(image.rating || 0);
     setKeywords(image.keywords || []);
+    setDescription(image.description || '');
     setNewKeyword('');
-  }, [image.imageGUID, image.groupNumber, image.rating, image.keywords]);
+  }, [image.imageGUID, image.groupNumber, image.rating, image.keywords, image.description]);
 
   const handleApprove = useCallback(async () => {
     setLoading(true);
@@ -113,6 +116,21 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       setLoading(false);
     }
   }, [image.imageGUID, onUpdate]);
+
+  const handleRegenerateAI = useCallback(async () => {
+    setRegeneratingAI(true);
+    try {
+      const result = await api.regenerateAI(image.imageGUID);
+      setKeywords(result.keywords);
+      setDescription(result.description);
+    } catch (err: any) {
+      console.error('Failed to regenerate AI content:', err);
+      const message = err.response?.data?.error || 'Failed to regenerate AI content';
+      alert(message);
+    } finally {
+      setRegeneratingAI(false);
+    }
+  }, [image.imageGUID]);
 
   const handleGroupSelect = useCallback((num: number) => {
     if (!loading) {
@@ -351,12 +369,24 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             </div>
           </div>
 
-          {image.description && (
-            <div className="description-section">
+          <div className="description-section">
+            <div className="description-header">
               <div className="description-label">AI Description:</div>
-              <p className="description-text">{image.description}</p>
+              <button
+                className="regenerate-ai-btn"
+                onClick={handleRegenerateAI}
+                disabled={loading || regeneratingAI}
+                title="Regenerate AI keywords and description"
+              >
+                {regeneratingAI ? 'Analyzing...' : 'Regenerate AI'}
+              </button>
             </div>
-          )}
+            {description ? (
+              <p className="description-text">{description}</p>
+            ) : (
+              <p className="description-placeholder">No AI description yet. Click "Regenerate AI" to generate.</p>
+            )}
+          </div>
 
           <div className="action-section">
             <button
