@@ -357,6 +357,44 @@
   cursor: not-allowed;
 }
 
+/* Description section (AI-generated) */
+.description-section {
+  padding: 1rem 1.5rem;
+  background: #1a1a2e;
+  border-top: 1px solid #2a3a5a;
+}
+
+.description-label {
+  font-size: 0.85rem;
+  color: #8892a6;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.description-label::after {
+  content: "AI";
+  font-size: 0.65rem;
+  background: #9b59b6;
+  color: white;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.description-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #b8c2d0;
+  font-style: italic;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid #9b59b6;
+}
+
 /* Action buttons section */
 .action-section {
   display: flex;

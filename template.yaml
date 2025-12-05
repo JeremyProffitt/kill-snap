@@ -33,6 +33,12 @@ Parameters:
     Description: ARN of ACM certificate in us-east-1 for CloudFront
     Default: 'DISABLED'
 
+  OpenAIApiKey:
+    Type: String
+    Description: OpenAI API key for GPT-4o vision analysis (optional)
+    NoEcho: true
+    Default: ''
+
 Resources:
   # S3 buckets are created by the deployment pipeline using AWS CLI
   # ImageBucket: $S3_BUCKET (from GitHub variables)
@@ -192,7 +198,7 @@ Resources:
       CodeUri: lambda/api/
       Handler: bootstrap
       MemorySize: 256
-      Timeout: 30
+      Timeout: 60
       Environment:
         Variables:
           BUCKET_NAME: !Ref S3BucketName
@@ -202,6 +208,7 @@ Resources:
           PROJECTS_TABLE: !Ref ProjectsTable
           ADMIN_USERNAME: !Ref AdminUsername
           ADMIN_PASSWORD: !Ref AdminPassword
+          OPENAI_API_KEY: !Ref OpenAIApiKey
       Policies:
         - Version: '2012-10-17'
           Statement:

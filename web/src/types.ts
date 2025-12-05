@@ -13,6 +13,7 @@ export interface Image {
   rating?: number;
   promoted?: boolean;
   keywords?: string[];
+  description?: string;
   exifData?: Record<string, string>;
   relatedFiles?: string[];
   status?: 'inbox' | 'approved' | 'rejected' | 'deleted' | 'project';

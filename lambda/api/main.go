@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -39,6 +41,7 @@ var (
 	adminUsername     string
 	adminPassword     string
 	functionName      string
+	openaiAPIKey      string
 	jwtSecret         = []byte("kill-snap-secret-key-change-in-production")
 )
 
@@ -55,6 +58,7 @@ func init() {
 	adminUsername = os.Getenv("ADMIN_USERNAME")
 	adminPassword = os.Getenv("ADMIN_PASSWORD")
 	functionName = os.Getenv("AWS_LAMBDA_FUNCTION_NAME")
+	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
 
 	// Initialize admin user if it doesn't exist
 	if adminUsername != "" && adminPassword != "" {
@@ -86,6 +90,7 @@ type ImageResponse struct {
 	Rating           int               `json:"rating,omitempty"`
 	Promoted         bool              `json:"promoted,omitempty"`
 	Keywords         []string          `json:"keywords,omitempty"`
+	Description      string            `json:"description,omitempty"` // AI-generated description
 	EXIFData         map[string]string `json:"exifData,omitempty"`
 	RelatedFiles     []string          `json:"relatedFiles,omitempty"`
 	InsertedDateTime string            `json:"insertedDateTime,omitempty"`
@@ -136,6 +141,49 @@ type AsyncMoveRequest struct {
 	DestPrefix  string `json:"destPrefix"`
 	NewStatus   string `json:"newStatus"` // "approved", "rejected", "deleted"
 	Bucket      string `json:"bucket"`
+}
+
+// OpenAI API types for GPT-4o vision analysis
+type OpenAIMessage struct {
+	Role    string        `json:"role"`
+	Content []interface{} `json:"content"`
+}
+
+type OpenAITextContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type OpenAIImageContent struct {
+	Type     string         `json:"type"`
+	ImageURL OpenAIImageURL `json:"image_url"`
+}
+
+type OpenAIImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail"` // "high" for high detail
+}
+
+type OpenAIRequest struct {
+	Model     string          `json:"model"`
+	Messages  []OpenAIMessage `json:"messages"`
+	MaxTokens int             `json:"max_tokens"`
+}
+
+type OpenAIResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type AIAnalysisResult struct {
+	Keywords    []string `json:"keywords"`
+	Description string   `json:"description"`
 }
 
 func initializeAdminUser() {
@@ -266,6 +314,136 @@ func deleteS3Object(bucket, key string) {
 	})
 }
 
+// analyzeImageWithGPT4o sends the image to OpenAI GPT-4o for keyword and description generation
+func analyzeImageWithGPT4o(bucket, thumbnailKey string) (*AIAnalysisResult, error) {
+	if openaiAPIKey == "" {
+		return nil, fmt.Errorf("OpenAI API key not configured")
+	}
+
+	// Download thumbnail from S3
+	getResult, err := s3Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(thumbnailKey),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to download thumbnail: %v", err)
+	}
+	defer getResult.Body.Close()
+
+	imageData, err := io.ReadAll(getResult.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read thumbnail data: %v", err)
+	}
+
+	// Determine MIME type from extension
+	mimeType := "image/jpeg"
+	if strings.HasSuffix(strings.ToLower(thumbnailKey), ".png") {
+		mimeType = "image/png"
+	}
+
+	// Base64 encode the image
+	base64Image := base64.StdEncoding.EncodeToString(imageData)
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Image)
+
+	// Build OpenAI request
+	prompt := `Analyze this photograph and provide:
+1. A list of 10-15 relevant keywords for cataloging (single words or short phrases, lowercase)
+2. A brief description (2-3 sentences) describing the image content, style, and mood
+
+Respond in JSON format exactly like this:
+{"keywords": ["keyword1", "keyword2", ...], "description": "Your description here."}`
+
+	openaiReq := OpenAIRequest{
+		Model: "gpt-4o",
+		Messages: []OpenAIMessage{
+			{
+				Role: "user",
+				Content: []interface{}{
+					OpenAITextContent{
+						Type: "text",
+						Text: prompt,
+					},
+					OpenAIImageContent{
+						Type: "image_url",
+						ImageURL: OpenAIImageURL{
+							URL:    dataURL,
+							Detail: "high",
+						},
+					},
+				},
+			},
+		},
+		MaxTokens: 500,
+	}
+
+	reqBody, err := json.Marshal(openaiReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal OpenAI request: %v", err)
+	}
+
+	// Make HTTP request to OpenAI
+	httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("OpenAI API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read OpenAI response: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var openaiResp OpenAIResponse
+	if err := json.Unmarshal(respBody, &openaiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse OpenAI response: %v", err)
+	}
+
+	if openaiResp.Error != nil {
+		return nil, fmt.Errorf("OpenAI API error: %s", openaiResp.Error.Message)
+	}
+
+	if len(openaiResp.Choices) == 0 {
+		return nil, fmt.Errorf("no response from OpenAI")
+	}
+
+	// Parse the JSON response from GPT-4o
+	content := openaiResp.Choices[0].Message.Content
+
+	// Try to extract JSON from the response (it might be wrapped in markdown code blocks)
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "```json") {
+		content = strings.TrimPrefix(content, "```json")
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	} else if strings.HasPrefix(content, "```") {
+		content = strings.TrimPrefix(content, "```")
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	}
+
+	var result AIAnalysisResult
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		// If JSON parsing fails, try to extract what we can
+		fmt.Printf("Failed to parse GPT-4o JSON response: %v, content: %s\n", err, content)
+		return nil, fmt.Errorf("failed to parse GPT-4o response as JSON: %v", err)
+	}
+
+	fmt.Printf("GPT-4o analysis complete: %d keywords, description length: %d\n", len(result.Keywords), len(result.Description))
+	return &result, nil
+}
+
 // handleAsyncMoveFiles processes async file move requests
 func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
 	fmt.Printf("Async move started for image %s to %s\n", req.ImageGUID, req.DestPrefix)
@@ -350,6 +528,66 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 	if err != nil {
 		fmt.Printf("Error updating image after move: %v\n", err)
 		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: fmt.Sprintf(`{"success": false, "error": "%v"}`, err)}, nil
+	}
+
+	// For approved images, analyze with GPT-4o to generate keywords and description
+	if req.NewStatus == "approved" && openaiAPIKey != "" {
+		fmt.Printf("Starting GPT-4o analysis for approved image %s\n", req.ImageGUID)
+
+		// Use the new thumbnail path after move
+		aiResult, err := analyzeImageWithGPT4o(req.Bucket, newPaths["thumbnail400"])
+		if err != nil {
+			fmt.Printf("GPT-4o analysis failed for image %s: %v\n", req.ImageGUID, err)
+			// Don't fail the whole operation, just log the error
+		} else {
+			// Merge AI keywords with existing user keywords (case-insensitive deduplication)
+			existingKeywordsLower := make(map[string]bool)
+			for _, kw := range img.Keywords {
+				existingKeywordsLower[strings.ToLower(kw)] = true
+			}
+
+			mergedKeywords := append([]string{}, img.Keywords...) // Start with existing
+			for _, kw := range aiResult.Keywords {
+				if !existingKeywordsLower[strings.ToLower(kw)] {
+					mergedKeywords = append(mergedKeywords, kw)
+					existingKeywordsLower[strings.ToLower(kw)] = true
+				}
+			}
+
+			// Build update expression for keywords and description
+			updateExpr := "SET #desc = :desc, UpdatedDateTime = :updated"
+			exprAttrValues := map[string]*dynamodb.AttributeValue{
+				":desc":    {S: aws.String(aiResult.Description)},
+				":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+			}
+			exprAttrNames := map[string]*string{
+				"#desc": aws.String("Description"),
+			}
+
+			if len(mergedKeywords) > 0 {
+				keywordsList := make([]*dynamodb.AttributeValue, len(mergedKeywords))
+				for i, kw := range mergedKeywords {
+					keywordsList[i] = &dynamodb.AttributeValue{S: aws.String(kw)}
+				}
+				updateExpr += ", Keywords = :keywords"
+				exprAttrValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
+			}
+
+			_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+				TableName: aws.String(imageTable),
+				Key: map[string]*dynamodb.AttributeValue{
+					"ImageGUID": {S: aws.String(req.ImageGUID)},
+				},
+				UpdateExpression:          aws.String(updateExpr),
+				ExpressionAttributeValues: exprAttrValues,
+				ExpressionAttributeNames:  exprAttrNames,
+			})
+			if updateErr != nil {
+				fmt.Printf("Error updating image with AI analysis: %v\n", updateErr)
+			} else {
+				fmt.Printf("GPT-4o analysis saved for image %s: %d keywords\n", req.ImageGUID, len(mergedKeywords))
+			}
+		}
 	}
 
 	fmt.Printf("Async move completed for image %s\n", req.ImageGUID)

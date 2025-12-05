@@ -351,6 +351,13 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             </div>
           </div>
 
+          {image.description && (
+            <div className="description-section">
+              <div className="description-label">AI Description:</div>
+              <p className="description-text">{image.description}</p>
+            </div>
+          )}
+
           <div className="action-section">
             <button
               onClick={handleApprove}
