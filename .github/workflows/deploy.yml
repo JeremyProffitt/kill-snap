@@ -284,8 +284,8 @@ jobs:
             CloudFrontCertificateArn=${{ vars.CLOUDFRONT_CERT_ARN }}"
 
           # Only add OpenAIApiKey if it's set (not empty)
-          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
-            PARAMS="${PARAMS} OpenAIApiKey=${{ secrets.OPENAI_API_KEY }}"
+          if [ -n "${{ secrets.OPENAPI_TOKEN }}" ]; then
+            PARAMS="${PARAMS} OpenAIApiKey=${{ secrets.OPENAPI_TOKEN }}"
           fi
 
           sam deploy \
