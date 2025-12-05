@@ -12,6 +12,7 @@ export interface Image {
   colorCode?: string;
   rating?: number;
   promoted?: boolean;
+  keywords?: string[];
   exifData?: Record<string, string>;
   relatedFiles?: string[];
   status?: 'inbox' | 'approved' | 'rejected' | 'deleted' | 'project';
@@ -33,6 +34,7 @@ export interface UpdateImageRequest {
   rating?: number;
   promoted?: boolean;
   reviewed?: string;
+  keywords?: string[];
 }
 
 export interface Project {

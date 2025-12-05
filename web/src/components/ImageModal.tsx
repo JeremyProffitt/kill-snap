@@ -48,13 +48,17 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 }) => {
   const [groupNumber, setGroupNumber] = useState<number>(0);
   const [rating, setRating] = useState<number>(0);
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [newKeyword, setNewKeyword] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
-  // Reset group and rating selection when image changes
+  // Reset group, rating, and keywords when image changes
   useEffect(() => {
     setGroupNumber(image.groupNumber || 0);
     setRating(image.rating || 0);
-  }, [image.imageGUID, image.groupNumber, image.rating]);
+    setKeywords(image.keywords || []);
+    setNewKeyword('');
+  }, [image.imageGUID, image.groupNumber, image.rating, image.keywords]);
 
   const handleApprove = useCallback(async () => {
     setLoading(true);
@@ -64,6 +68,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         groupNumber,
         colorCode: group?.name.toLowerCase() || 'none',
         rating,
+        keywords,
         promoted: false,
         reviewed: 'true',
       });
@@ -74,7 +79,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [groupNumber, rating, image.imageGUID, onUpdate]);
+  }, [groupNumber, rating, keywords, image.imageGUID, onUpdate]);
 
   const handleReject = useCallback(async () => {
     setLoading(true);
@@ -120,6 +125,28 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       setRating(stars);
     }
   }, [loading]);
+
+  const handleAddKeyword = useCallback(() => {
+    const trimmed = newKeyword.trim();
+    if (trimmed && !keywords.includes(trimmed) && !loading) {
+      setKeywords([...keywords, trimmed]);
+      setNewKeyword('');
+    }
+  }, [newKeyword, keywords, loading]);
+
+  const handleRemoveKeyword = useCallback((keyword: string) => {
+    if (!loading) {
+      setKeywords(keywords.filter(k => k !== keyword));
+    }
+  }, [keywords, loading]);
+
+  const handleKeywordKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleAddKeyword();
+    }
+  }, [handleAddKeyword]);
 
   const handlePrev = useCallback(() => {
     if (hasPrev && !loading) {
@@ -283,6 +310,44 @@ export const ImageModal: React.FC<ImageModalProps> = ({
               {rating > 0 && (
                 <span className="rating-value">{rating} star{rating > 1 ? 's' : ''}</span>
               )}
+            </div>
+          </div>
+
+          <div className="keywords-section">
+            <div className="keywords-label">Keywords:</div>
+            <div className="keywords-container">
+              {keywords.map((keyword) => (
+                <span key={keyword} className="keyword-tag">
+                  {keyword}
+                  <button
+                    type="button"
+                    className="keyword-remove"
+                    onClick={() => handleRemoveKeyword(keyword)}
+                    disabled={loading}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="keyword-input-row">
+              <input
+                type="text"
+                value={newKeyword}
+                onChange={(e) => setNewKeyword(e.target.value)}
+                onKeyDown={handleKeywordKeyDown}
+                placeholder="Add keyword..."
+                disabled={loading}
+                className="keyword-input"
+              />
+              <button
+                type="button"
+                onClick={handleAddKeyword}
+                disabled={loading || !newKeyword.trim()}
+                className="keyword-add-btn"
+              >
+                Add
+              </button>
             </div>
           </div>
 

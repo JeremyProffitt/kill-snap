@@ -80,6 +80,7 @@ type ImageResponse struct {
 	ColorCode        string            `json:"colorCode,omitempty"`
 	Rating           int               `json:"rating,omitempty"`
 	Promoted         bool              `json:"promoted,omitempty"`
+	Keywords         []string          `json:"keywords,omitempty"`
 	EXIFData         map[string]string `json:"exifData,omitempty"`
 	RelatedFiles     []string          `json:"relatedFiles,omitempty"`
 	InsertedDateTime string            `json:"insertedDateTime,omitempty"`
@@ -87,24 +88,32 @@ type ImageResponse struct {
 }
 
 type UpdateImageRequest struct {
-	GroupNumber int    `json:"groupNumber,omitempty"`
-	ColorCode   string `json:"colorCode,omitempty"`
-	Rating      int    `json:"rating,omitempty"`
-	Promoted    bool   `json:"promoted,omitempty"`
-	Reviewed    string `json:"reviewed,omitempty"`
+	GroupNumber int      `json:"groupNumber,omitempty"`
+	ColorCode   string   `json:"colorCode,omitempty"`
+	Rating      int      `json:"rating,omitempty"`
+	Promoted    bool     `json:"promoted,omitempty"`
+	Reviewed    string   `json:"reviewed,omitempty"`
+	Keywords    []string `json:"keywords,omitempty"`
 }
 
 type Project struct {
-	ProjectID        string `json:"projectId"`
-	Name             string `json:"name"`
-	CreatedAt        string `json:"createdAt"`
-	ImageCount       int    `json:"imageCount"`
-	CatalogPath      string `json:"catalogPath,omitempty"`
-	CatalogUpdatedAt string `json:"catalogUpdatedAt,omitempty"`
+	ProjectID        string   `json:"projectId"`
+	Name             string   `json:"name"`
+	CreatedAt        string   `json:"createdAt"`
+	ImageCount       int      `json:"imageCount"`
+	CatalogPath      string   `json:"catalogPath,omitempty"`
+	CatalogUpdatedAt string   `json:"catalogUpdatedAt,omitempty"`
+	Keywords         []string `json:"keywords,omitempty"`
 }
 
 type CreateProjectRequest struct {
-	Name string `json:"name"`
+	Name     string   `json:"name"`
+	Keywords []string `json:"keywords,omitempty"`
+}
+
+type UpdateProjectRequest struct {
+	Name     string   `json:"name,omitempty"`
+	Keywords []string `json:"keywords,omitempty"`
 }
 
 type AddToProjectRequest struct {
@@ -361,10 +370,24 @@ func generateProjectCatalog(project Project, images []ImageResponse) error {
 		}
 
 		// Add image to catalog
-		_, err = catalog.AddImage(imageInput)
+		catalogImage, err := catalog.AddImage(imageInput)
 		if err != nil {
 			fmt.Printf("Warning: failed to add image %s: %v\n", fileName, err)
 			continue
+		}
+
+		// Add keywords to the image
+		if len(img.Keywords) > 0 {
+			for _, keyword := range img.Keywords {
+				kw, err := catalog.GetOrCreateKeyword(keyword, nil)
+				if err != nil {
+					fmt.Printf("Warning: failed to create keyword %s: %v\n", keyword, err)
+					continue
+				}
+				if err := catalog.AddKeywordToImage(catalogImage.ID, kw.ID); err != nil {
+					fmt.Printf("Warning: failed to add keyword %s to image: %v\n", keyword, err)
+				}
+			}
 		}
 	}
 
@@ -487,6 +510,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return handleListProjects(headers)
 	case path == "/api/projects" && method == "POST":
 		return handleCreateProject(request, headers)
+	case strings.HasPrefix(path, "/api/projects/") && !strings.Contains(path[len("/api/projects/"):], "/") && method == "PUT":
+		projectID := strings.TrimPrefix(path, "/api/projects/")
+		return handleUpdateProject(projectID, request, headers)
 	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/images") && method == "POST":
 		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/images")
 		return handleAddToProject(projectID, request, headers)
@@ -716,6 +742,21 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		exprAttrValues[":rating"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", updateReq.Rating))}
 	}
 
+	// Update keywords if provided
+	if updateReq.Keywords != nil {
+		if len(updateReq.Keywords) > 0 {
+			keywordsList := make([]*dynamodb.AttributeValue, len(updateReq.Keywords))
+			for i, kw := range updateReq.Keywords {
+				keywordsList[i] = &dynamodb.AttributeValue{S: aws.String(kw)}
+			}
+			updateExpr += ", Keywords = :keywords"
+			exprAttrValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
+		} else {
+			// Empty array means remove keywords
+			updateExpr += " REMOVE Keywords"
+		}
+	}
+
 	if updateReq.Reviewed != "" {
 		updateExpr += ", Reviewed = :reviewed"
 		exprAttrValues[":reviewed"] = &dynamodb.AttributeValue{S: aws.String(updateReq.Reviewed)}
@@ -908,6 +949,7 @@ func handleCreateProject(request events.APIGatewayProxyRequest, headers map[stri
 		Name:       req.Name,
 		CreatedAt:  time.Now().Format(time.RFC3339),
 		ImageCount: 0,
+		Keywords:   req.Keywords,
 	}
 
 	av, _ := dynamodbattribute.MarshalMap(project)
@@ -932,6 +974,85 @@ func handleCreateProject(request events.APIGatewayProxyRequest, headers map[stri
 	body, _ := json.Marshal(project)
 	return events.APIGatewayProxyResponse{
 		StatusCode: 201,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleUpdateProject(projectID string, request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	var req UpdateProjectRequest
+	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		return errorResponse(400, "Invalid request body", headers)
+	}
+
+	// Get existing project
+	getResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || getResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(getResult.Item, &project)
+
+	// Build update expression
+	updateExpr := "SET UpdatedAt = :updated"
+	exprAttrValues := map[string]*dynamodb.AttributeValue{
+		":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+	}
+
+	// Update name if provided
+	if req.Name != "" {
+		updateExpr += ", #name = :name"
+		exprAttrValues[":name"] = &dynamodb.AttributeValue{S: aws.String(req.Name)}
+		project.Name = req.Name
+	}
+
+	// Update keywords (can be empty array to clear)
+	if req.Keywords != nil {
+		if len(req.Keywords) > 0 {
+			keywordsList := make([]*dynamodb.AttributeValue, len(req.Keywords))
+			for i, kw := range req.Keywords {
+				keywordsList[i] = &dynamodb.AttributeValue{S: aws.String(kw)}
+			}
+			updateExpr += ", Keywords = :keywords"
+			exprAttrValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
+		} else {
+			// Remove keywords if empty array
+			updateExpr += " REMOVE Keywords"
+		}
+		project.Keywords = req.Keywords
+	}
+
+	updateInput := &dynamodb.UpdateItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+		UpdateExpression:          aws.String(updateExpr),
+		ExpressionAttributeValues: exprAttrValues,
+	}
+
+	// Add expression attribute names if we're updating name
+	if req.Name != "" {
+		updateInput.ExpressionAttributeNames = map[string]*string{
+			"#name": aws.String("Name"),
+		}
+	}
+
+	_, err = ddbClient.UpdateItem(updateInput)
+	if err != nil {
+		fmt.Printf("Error updating project: %v\n", err)
+		return errorResponse(500, "Failed to update project", headers)
+	}
+
+	body, _ := json.Marshal(project)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
 		Headers:    headers,
 		Body:       string(body),
 	}, nil
