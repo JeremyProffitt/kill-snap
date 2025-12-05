@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ var (
 	sess              *session.Session
 	ddbClient         *dynamodb.DynamoDB
 	s3Client          *s3.S3
+	lambdaClient      *lambda.Lambda
 	bucketName        string
 	imageTable        string
 	usersTable        string
@@ -36,6 +38,7 @@ var (
 	projectsTable     string
 	adminUsername     string
 	adminPassword     string
+	functionName      string
 	jwtSecret         = []byte("kill-snap-secret-key-change-in-production")
 )
 
@@ -43,6 +46,7 @@ func init() {
 	sess = session.Must(session.NewSession())
 	ddbClient = dynamodb.New(sess)
 	s3Client = s3.New(sess)
+	lambdaClient = lambda.New(sess)
 	bucketName = os.Getenv("BUCKET_NAME")
 	imageTable = os.Getenv("IMAGE_TABLE")
 	usersTable = os.Getenv("USERS_TABLE")
@@ -50,6 +54,7 @@ func init() {
 	projectsTable = os.Getenv("PROJECTS_TABLE")
 	adminUsername = os.Getenv("ADMIN_USERNAME")
 	adminPassword = os.Getenv("ADMIN_PASSWORD")
+	functionName = os.Getenv("AWS_LAMBDA_FUNCTION_NAME")
 
 	// Initialize admin user if it doesn't exist
 	if adminUsername != "" && adminPassword != "" {
@@ -97,13 +102,13 @@ type UpdateImageRequest struct {
 }
 
 type Project struct {
-	ProjectID        string   `json:"projectId"`
-	Name             string   `json:"name"`
-	CreatedAt        string   `json:"createdAt"`
-	ImageCount       int      `json:"imageCount"`
-	CatalogPath      string   `json:"catalogPath,omitempty"`
-	CatalogUpdatedAt string   `json:"catalogUpdatedAt,omitempty"`
-	Keywords         []string `json:"keywords,omitempty"`
+	ProjectID        string   `json:"projectId" dynamodbav:"ProjectID"`
+	Name             string   `json:"name" dynamodbav:"Name"`
+	CreatedAt        string   `json:"createdAt" dynamodbav:"CreatedAt"`
+	ImageCount       int      `json:"imageCount" dynamodbav:"ImageCount"`
+	CatalogPath      string   `json:"catalogPath,omitempty" dynamodbav:"CatalogPath,omitempty"`
+	CatalogUpdatedAt string   `json:"catalogUpdatedAt,omitempty" dynamodbav:"CatalogUpdatedAt,omitempty"`
+	Keywords         []string `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
 }
 
 type CreateProjectRequest struct {
