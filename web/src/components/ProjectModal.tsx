@@ -30,6 +30,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [imageFilter, setImageFilter] = useState<'all' | number>('all');
   const [loading, setLoading] = useState(false);
+  const [downloadingProject, setDownloadingProject] = useState<string | null>(null);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
@@ -84,6 +85,33 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setResult({ success: false, message: 'Failed to add images to project' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownloadCatalog = async (project: Project) => {
+    setDownloadingProject(project.projectId);
+    setResult(null);
+    try {
+      const response = await api.getProjectCatalog(project.projectId);
+      // Trigger download by opening the presigned URL
+      const link = document.createElement('a');
+      link.href = response.url;
+      link.download = response.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setResult({
+        success: true,
+        message: `Downloading Lightroom catalog for "${project.name}"`
+      });
+    } catch (err: any) {
+      console.error('Failed to download catalog:', err);
+      const errorMsg = err.response?.status === 404
+        ? 'No catalog found for this project'
+        : 'Failed to download catalog';
+      setResult({ success: false, message: errorMsg });
+    } finally {
+      setDownloadingProject(null);
     }
   };
 
@@ -189,11 +217,21 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             <ul>
               {existingProjects.map((project) => (
                 <li key={project.projectId}>
-                  <span className="project-name">{project.name}</span>
-                  <span className="project-count">{project.imageCount} images</span>
-                  <span className="project-date">
-                    Created: {new Date(project.createdAt).toLocaleDateString()}
-                  </span>
+                  <div className="project-info">
+                    <span className="project-name">{project.name}</span>
+                    <span className="project-count">{project.imageCount} images</span>
+                    <span className="project-date">
+                      Created: {new Date(project.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <button
+                    className="download-catalog-btn"
+                    onClick={() => handleDownloadCatalog(project)}
+                    disabled={downloadingProject === project.projectId || project.imageCount === 0}
+                    title={project.imageCount === 0 ? 'No images in project' : 'Download Lightroom Catalog'}
+                  >
+                    {downloadingProject === project.projectId ? 'Downloading...' : 'Download .lrcat'}
+                  </button>
                 </li>
               ))}
             </ul>

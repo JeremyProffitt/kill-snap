@@ -38,6 +38,14 @@ export interface Project {
   name: string;
   createdAt: string;
   imageCount: number;
+  catalogPath?: string;
+  catalogUpdatedAt?: string;
+}
+
+export interface CatalogDownloadResponse {
+  url: string;
+  filename: string;
+  updatedAt: string;
 }
 
 export interface AddToProjectRequest {

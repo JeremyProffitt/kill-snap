@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
-import { Image, UpdateImageRequest, Project, AddToProjectRequest } from '../types';
+import { Image, UpdateImageRequest, Project, AddToProjectRequest, CatalogDownloadResponse } from '../types';
 
 export interface ImageFilters {
   state?: 'unreviewed' | 'approved' | 'rejected' | 'all';
@@ -88,6 +88,14 @@ export const api = {
   async getProjectImages(projectId: string): Promise<Image[]> {
     const response = await axios.get<Image[]>(
       `${API_BASE_URL}/api/projects/${projectId}/images`,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
+
+  async getProjectCatalog(projectId: string): Promise<CatalogDownloadResponse> {
+    const response = await axios.get<CatalogDownloadResponse>(
+      `${API_BASE_URL}/api/projects/${projectId}/catalog`,
       { headers: authService.getAuthHeader() }
     );
     return response.data;

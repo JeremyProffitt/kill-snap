@@ -190,6 +190,7 @@
 .existing-projects li {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
   padding: 0.75rem;
   background: #16213e;
@@ -197,8 +198,16 @@
   font-size: 0.9rem;
 }
 
-.existing-projects .project-name {
+.existing-projects .project-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
   flex: 1;
+  min-width: 0;
+}
+
+.existing-projects .project-name {
   color: #fff;
   font-weight: 500;
 }
@@ -213,6 +222,29 @@
   font-size: 0.8rem;
 }
 
+.download-catalog-btn {
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 6px;
+  background: #27ae60;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.download-catalog-btn:hover:not(:disabled) {
+  background: #2ecc71;
+  transform: translateY(-1px);
+}
+
+.download-catalog-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 500px) {
   .project-modal-content {
     margin: 0;
@@ -223,7 +255,18 @@
 
   .existing-projects li {
     flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .existing-projects .project-info {
+    flex-direction: column;
     align-items: flex-start;
     gap: 0.25rem;
+  }
+
+  .download-catalog-btn {
+    width: 100%;
+    text-align: center;
   }
 }

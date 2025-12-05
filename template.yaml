@@ -283,6 +283,12 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/projects/{projectId}/images
             Method: GET
+        GetProjectCatalog:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/catalog
+            Method: GET
 
   # CloudFront Origin Access Control
   CloudFrontOAC:

@@ -1,6 +1,8 @@
 # Lambda build artifacts
 lambda/bootstrap
 lambda/deployment.zip
+lambda/*/main
+lambda/*/bootstrap
 *.zip
 
 # Go
