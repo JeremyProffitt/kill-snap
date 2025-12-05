@@ -9,15 +9,13 @@ interface ProjectModalProps {
   existingProjects: Project[];
 }
 
+// Lightroom color labels: Red, Yellow, Green, Blue, Purple
 const GROUP_COLORS = [
   { number: 1, color: '#e74c3c', name: 'Red' },
-  { number: 2, color: '#3498db', name: 'Blue' },
+  { number: 2, color: '#f1c40f', name: 'Yellow' },
   { number: 3, color: '#2ecc71', name: 'Green' },
-  { number: 4, color: '#f1c40f', name: 'Yellow' },
+  { number: 4, color: '#3498db', name: 'Blue' },
   { number: 5, color: '#9b59b6', name: 'Purple' },
-  { number: 6, color: '#e67e22', name: 'Orange' },
-  { number: 7, color: '#e91e63', name: 'Pink' },
-  { number: 8, color: '#795548', name: 'Brown' },
 ];
 
 export const ProjectModal: React.FC<ProjectModalProps> = ({

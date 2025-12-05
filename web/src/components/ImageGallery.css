@@ -231,11 +231,29 @@
   background: #16213e;
 }
 
+.image-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
 .image-dimensions {
   font-size: 0.8rem;
   color: #8892a6;
-  text-align: center;
-  margin-bottom: 0.5rem;
+}
+
+.image-rating-display {
+  font-size: 0.85rem;
+  letter-spacing: -1px;
+}
+
+.image-rating-display .star {
+  color: #f1c40f;
+}
+
+.image-rating-display .star.empty {
+  color: #4a4a5a;
 }
 
 /* Mini group buttons */

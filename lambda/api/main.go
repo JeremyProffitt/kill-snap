@@ -78,6 +78,7 @@ type ImageResponse struct {
 	Reviewed         string            `json:"reviewed"`
 	GroupNumber      int               `json:"groupNumber,omitempty"`
 	ColorCode        string            `json:"colorCode,omitempty"`
+	Rating           int               `json:"rating,omitempty"`
 	Promoted         bool              `json:"promoted,omitempty"`
 	EXIFData         map[string]string `json:"exifData,omitempty"`
 	RelatedFiles     []string          `json:"relatedFiles,omitempty"`
@@ -88,6 +89,7 @@ type ImageResponse struct {
 type UpdateImageRequest struct {
 	GroupNumber int    `json:"groupNumber,omitempty"`
 	ColorCode   string `json:"colorCode,omitempty"`
+	Rating      int    `json:"rating,omitempty"`
 	Promoted    bool   `json:"promoted,omitempty"`
 	Reviewed    string `json:"reviewed,omitempty"`
 }
@@ -239,9 +241,9 @@ func deleteS3Object(bucket, key string) {
 }
 
 func getColorName(groupNumber int) string {
+	// Matches Lightroom color labels: Red, Yellow, Green, Blue, Purple
 	colors := map[int]string{
-		0: "none", 1: "red", 2: "blue", 3: "green", 4: "yellow",
-		5: "purple", 6: "orange", 7: "pink", 8: "brown",
+		0: "none", 1: "red", 2: "yellow", 3: "green", 4: "blue", 5: "purple",
 	}
 	if name, ok := colors[groupNumber]; ok {
 		return name
@@ -251,16 +253,13 @@ func getColorName(groupNumber int) string {
 
 // getLightroomColorLabel maps our group numbers to Lightroom color labels
 func getLightroomColorLabel(groupNumber int) string {
-	// Lightroom supports: Red, Yellow, Green, Blue, Purple
+	// Lightroom color labels: Red, Yellow, Green, Blue, Purple
 	labels := map[int]string{
-		1: "Red",    // Red
-		2: "Blue",   // Blue
-		3: "Green",  // Green
-		4: "Yellow", // Yellow
-		5: "Purple", // Purple
-		6: "Yellow", // Orange -> Yellow (closest)
-		7: "Red",    // Pink -> Red (closest)
-		8: "Purple", // Brown -> Purple (closest)
+		1: "Red",
+		2: "Yellow",
+		3: "Green",
+		4: "Blue",
+		5: "Purple",
 	}
 	if label, ok := labels[groupNumber]; ok {
 		return label
@@ -355,12 +354,9 @@ func generateProjectCatalog(project Project, images []ImageResponse) error {
 			imageInput.Height = &h
 		}
 
-		// Add rating based on group (1-5 stars, groups 6-8 get 5 stars)
-		if img.GroupNumber > 0 {
-			rating := img.GroupNumber
-			if rating > 5 {
-				rating = 5
-			}
+		// Add rating from image (1-5 stars)
+		if img.Rating > 0 && img.Rating <= 5 {
+			rating := img.Rating
 			imageInput.Rating = &rating
 		}
 
@@ -712,6 +708,12 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 	if updateReq.Promoted {
 		updateExpr += ", Promoted = :promoted"
 		exprAttrValues[":promoted"] = &dynamodb.AttributeValue{BOOL: aws.Bool(true)}
+	}
+
+	// Rating is 0-5, where 0 means no rating
+	if updateReq.Rating >= 0 && updateReq.Rating <= 5 {
+		updateExpr += ", Rating = :rating"
+		exprAttrValues[":rating"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", updateReq.Rating))}
 	}
 
 	if updateReq.Reviewed != "" {

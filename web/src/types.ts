@@ -10,6 +10,7 @@ export interface Image {
   reviewed: string;
   groupNumber?: number;
   colorCode?: string;
+  rating?: number;
   promoted?: boolean;
   exifData?: Record<string, string>;
   relatedFiles?: string[];
@@ -29,6 +30,7 @@ export interface LoginResponse {
 export interface UpdateImageRequest {
   groupNumber?: number;
   colorCode?: string;
+  rating?: number;
   promoted?: boolean;
   reviewed?: string;
 }

@@ -10,19 +10,26 @@ interface ImageGalleryProps {
   onLogout: () => void;
 }
 
+// Lightroom color labels: Red, Yellow, Green, Blue, Purple
 const GROUP_COLORS = [
   { number: 0, color: '#ffffff', name: 'None' },
   { number: 1, color: '#e74c3c', name: 'Red' },
-  { number: 2, color: '#3498db', name: 'Blue' },
+  { number: 2, color: '#f1c40f', name: 'Yellow' },
   { number: 3, color: '#2ecc71', name: 'Green' },
-  { number: 4, color: '#f1c40f', name: 'Yellow' },
+  { number: 4, color: '#3498db', name: 'Blue' },
   { number: 5, color: '#9b59b6', name: 'Purple' },
-  { number: 6, color: '#e67e22', name: 'Orange' },
-  { number: 7, color: '#e91e63', name: 'Pink' },
-  { number: 8, color: '#795548', name: 'Brown' },
 ];
 
 type StateFilter = 'unreviewed' | 'approved' | 'rejected' | 'all';
+
+// Helper to render star rating
+const renderStars = (rating: number, maxStars: number = 5) => {
+  return Array.from({ length: maxStars }, (_, i) => (
+    <span key={i} className={`star ${i < rating ? 'filled' : 'empty'}`}>
+      {i < rating ? '★' : '☆'}
+    </span>
+  ));
+};
 
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [images, setImages] = useState<Image[]>([]);
@@ -303,8 +310,15 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 </div>
               </div>
               <div className="image-info">
-                <div className="image-dimensions">
-                  {image.width}×{image.height}
+                <div className="image-meta-row">
+                  <div className="image-dimensions">
+                    {image.width}×{image.height}
+                  </div>
+                  {image.rating ? (
+                    <div className="image-rating-display">
+                      {renderStars(image.rating)}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="group-buttons-mini">
                   {GROUP_COLORS.slice(1).map((group) => (

@@ -14,16 +14,14 @@ interface ImageModalProps {
   totalImages: number;
 }
 
+// Lightroom color labels: Red, Yellow, Green, Blue, Purple
 const GROUP_COLORS = [
   { number: 0, color: '#ffffff', name: 'None', textColor: '#333' },
   { number: 1, color: '#e74c3c', name: 'Red', textColor: '#fff' },
-  { number: 2, color: '#3498db', name: 'Blue', textColor: '#fff' },
+  { number: 2, color: '#f1c40f', name: 'Yellow', textColor: '#333' },
   { number: 3, color: '#2ecc71', name: 'Green', textColor: '#fff' },
-  { number: 4, color: '#f1c40f', name: 'Yellow', textColor: '#333' },
+  { number: 4, color: '#3498db', name: 'Blue', textColor: '#fff' },
   { number: 5, color: '#9b59b6', name: 'Purple', textColor: '#fff' },
-  { number: 6, color: '#e67e22', name: 'Orange', textColor: '#fff' },
-  { number: 7, color: '#e91e63', name: 'Pink', textColor: '#fff' },
-  { number: 8, color: '#795548', name: 'Brown', textColor: '#fff' },
 ];
 
 const formatFileSize = (bytes: number): string => {
@@ -49,12 +47,14 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   totalImages,
 }) => {
   const [groupNumber, setGroupNumber] = useState<number>(0);
+  const [rating, setRating] = useState<number>(0);
   const [loading, setLoading] = useState(false);
 
-  // Reset group selection when image changes
+  // Reset group and rating selection when image changes
   useEffect(() => {
-    setGroupNumber(0);
-  }, [image.imageGUID]);
+    setGroupNumber(image.groupNumber || 0);
+    setRating(image.rating || 0);
+  }, [image.imageGUID, image.groupNumber, image.rating]);
 
   const handleApprove = useCallback(async () => {
     setLoading(true);
@@ -63,6 +63,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       await api.updateImage(image.imageGUID, {
         groupNumber,
         colorCode: group?.name.toLowerCase() || 'none',
+        rating,
         promoted: false,
         reviewed: 'true',
       });
@@ -73,7 +74,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [groupNumber, image.imageGUID, onUpdate]);
+  }, [groupNumber, rating, image.imageGUID, onUpdate]);
 
   const handleReject = useCallback(async () => {
     setLoading(true);
@@ -114,6 +115,12 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     }
   }, [loading]);
 
+  const handleRatingSelect = useCallback((stars: number) => {
+    if (!loading) {
+      setRating(stars);
+    }
+  }, [loading]);
+
   const handlePrev = useCallback(() => {
     if (hasPrev && !loading) {
       onNavigate('prev');
@@ -148,8 +155,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         return;
       }
 
-      // Number keys 0-8 for group selection
-      if (key >= '0' && key <= '8') {
+      // Number keys 0-5 for group selection (Lightroom colors)
+      if (key >= '0' && key <= '5') {
         e.preventDefault();
         handleGroupSelect(parseInt(key));
         return;
@@ -239,7 +246,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           </div>
 
           <div className="group-section">
-            <div className="group-label">Assign Group (0-8, 0=None/White):</div>
+            <div className="group-label">Color Label (0-5):</div>
             <div className="group-buttons">
               {GROUP_COLORS.map((group) => (
                 <button
@@ -256,6 +263,26 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   {group.number}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="rating-section">
+            <div className="rating-label">Star Rating:</div>
+            <div className="rating-stars">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  className={`star-btn ${rating >= star ? 'filled' : 'empty'}`}
+                  onClick={() => handleRatingSelect(star === rating ? 0 : star)}
+                  disabled={loading}
+                  title={`${star} star${star > 1 ? 's' : ''} (click again to clear)`}
+                >
+                  {rating >= star ? '★' : '☆'}
+                </button>
+              ))}
+              {rating > 0 && (
+                <span className="rating-value">{rating} star{rating > 1 ? 's' : ''}</span>
+              )}
             </div>
           </div>
 
@@ -288,7 +315,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
           <div className="keyboard-hints">
             <span>← → Navigate</span>
-            <span>0-8: Group</span>
+            <span>0-5: Color</span>
             <span>Enter: Approve</span>
             <span>R: Reject</span>
             <span>D: Delete</span>
