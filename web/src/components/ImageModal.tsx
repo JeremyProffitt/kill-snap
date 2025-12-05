@@ -261,8 +261,11 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         </button>
 
         <div className="modal-body">
-          <div className="image-counter">
-            {currentIndex + 1} / {totalImages}
+          <div className="modal-header">
+            <h2 className="modal-title">Review Image</h2>
+            <div className="image-counter">
+              {currentIndex + 1} / {totalImages}
+            </div>
           </div>
 
           <div className="image-preview">

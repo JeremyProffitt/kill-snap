@@ -93,18 +93,30 @@
   flex-direction: column;
 }
 
-/* Image counter */
-.image-counter {
-  position: absolute;
-  top: 0.75rem;
-  left: 0.75rem;
-  background: rgba(0, 0, 0, 0.6);
+/* Modal header with title and counter */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #16213e;
+  border-bottom: 1px solid #2a3a5a;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
   color: #fff;
-  padding: 0.35rem 0.75rem;
-  border-radius: 20px;
-  font-size: 0.85rem;
+}
+
+.image-counter {
+  background: rgba(0, 0, 0, 0.4);
+  color: #8892a6;
+  padding: 0.3rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
   font-weight: 500;
-  z-index: 10;
 }
 
 .image-preview {
