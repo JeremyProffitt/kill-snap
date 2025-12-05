@@ -228,6 +228,10 @@ Resources:
                 - !GetAtt UsersTable.Arn
                 - !GetAtt ReviewGroupsTable.Arn
                 - !GetAtt ProjectsTable.Arn
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ImageReviewApi'
       Events:
         Login:
           Type: Api

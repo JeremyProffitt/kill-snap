@@ -91,6 +91,21 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     loadImages();
   }, [loadImages]);
 
+  // Auto-refresh when images have pending/moving status
+  useEffect(() => {
+    const hasPendingMoves = images.some(
+      img => img.moveStatus === 'pending' || img.moveStatus === 'moving'
+    );
+
+    if (hasPendingMoves) {
+      const interval = setInterval(() => {
+        loadImages();
+      }, 2000); // Poll every 2 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [images, loadImages]);
+
   const handleImageClick = (index: number) => {
     setSelectedImageIndex(index);
   };
@@ -292,6 +307,19 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 {(image.rating ?? 0) > 0 && (
                   <div className="thumbnail-rating">
                     {renderStars(image.rating ?? 0)}
+                  </div>
+                )}
+                {(image.moveStatus === 'pending' || image.moveStatus === 'moving') && (
+                  <div className="move-status-indicator">
+                    <span className="spinner"></span>
+                    <span className="status-text">
+                      {image.moveStatus === 'pending' ? 'Queued' : 'Moving...'}
+                    </span>
+                  </div>
+                )}
+                {image.moveStatus === 'failed' && (
+                  <div className="move-status-indicator error">
+                    <span className="status-text">Move Failed</span>
                   </div>
                 )}
                 <div className="quick-actions-overlay">

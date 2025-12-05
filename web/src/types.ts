@@ -17,6 +17,7 @@ export interface Image {
   relatedFiles?: string[];
   status?: 'inbox' | 'approved' | 'rejected' | 'deleted' | 'project';
   projectId?: string;
+  moveStatus?: 'pending' | 'moving' | 'complete' | 'failed';
 }
 
 export interface LoginRequest {

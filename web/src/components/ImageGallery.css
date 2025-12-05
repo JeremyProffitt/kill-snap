@@ -196,6 +196,51 @@
   color: #6a6a6a;
 }
 
+/* Move status indicator */
+.move-status-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.8);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 8;
+}
+
+.move-status-indicator .spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.move-status-indicator .status-text {
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.move-status-indicator.error {
+  background: rgba(231, 76, 60, 0.9);
+}
+
+.move-status-indicator.error .status-text {
+  color: #fff;
+}
+
 /* Quick action buttons overlay - FIXED */
 .quick-actions-overlay {
   position: absolute;

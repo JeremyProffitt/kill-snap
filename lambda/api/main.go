@@ -19,7 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/lambda"
+	lambdasvc "github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -30,7 +30,7 @@ var (
 	sess              *session.Session
 	ddbClient         *dynamodb.DynamoDB
 	s3Client          *s3.S3
-	lambdaClient      *lambda.Lambda
+	lambdaClient      *lambdasvc.Lambda
 	bucketName        string
 	imageTable        string
 	usersTable        string
@@ -46,7 +46,7 @@ func init() {
 	sess = session.Must(session.NewSession())
 	ddbClient = dynamodb.New(sess)
 	s3Client = s3.New(sess)
-	lambdaClient = lambda.New(sess)
+	lambdaClient = lambdasvc.New(sess)
 	bucketName = os.Getenv("BUCKET_NAME")
 	imageTable = os.Getenv("IMAGE_TABLE")
 	usersTable = os.Getenv("USERS_TABLE")
@@ -90,6 +90,9 @@ type ImageResponse struct {
 	RelatedFiles     []string          `json:"relatedFiles,omitempty"`
 	InsertedDateTime string            `json:"insertedDateTime,omitempty"`
 	UpdatedDateTime  string            `json:"updatedDateTime,omitempty"`
+	MoveStatus       string            `json:"moveStatus,omitempty"` // "pending", "moving", "complete", "failed"
+	Status           string            `json:"status,omitempty"`     // "inbox", "approved", "rejected", "deleted", "project"
+	ProjectID        string            `json:"projectId,omitempty"`
 }
 
 type UpdateImageRequest struct {
@@ -124,6 +127,15 @@ type UpdateProjectRequest struct {
 type AddToProjectRequest struct {
 	All   bool `json:"all,omitempty"`
 	Group int  `json:"group,omitempty"`
+}
+
+// AsyncMoveRequest is used for async Lambda invocation to move files
+type AsyncMoveRequest struct {
+	Action      string `json:"action"` // "move_files"
+	ImageGUID   string `json:"imageGUID"`
+	DestPrefix  string `json:"destPrefix"`
+	NewStatus   string `json:"newStatus"` // "approved", "rejected", "deleted"
+	Bucket      string `json:"bucket"`
 }
 
 func initializeAdminUser() {
@@ -252,6 +264,126 @@ func deleteS3Object(bucket, key string) {
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
+}
+
+// handleAsyncMoveFiles processes async file move requests
+func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	fmt.Printf("Async move started for image %s to %s\n", req.ImageGUID, req.DestPrefix)
+
+	// Update status to "moving"
+	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(req.ImageGUID)},
+		},
+		UpdateExpression: aws.String("SET MoveStatus = :status"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":status": {S: aws.String("moving")},
+		},
+	})
+	if err != nil {
+		fmt.Printf("Error updating move status to moving: %v\n", err)
+	}
+
+	// Get current image metadata
+	getResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(req.ImageGUID)},
+		},
+	})
+	if err != nil || getResult.Item == nil {
+		// Update status to failed
+		ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(req.ImageGUID)},
+			},
+			UpdateExpression: aws.String("SET MoveStatus = :status"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":status": {S: aws.String("failed")},
+			},
+		})
+		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": false, "error": "Image not found"}`}, nil
+	}
+
+	var img ImageResponse
+	dynamodbattribute.UnmarshalMap(getResult.Item, &img)
+
+	// Move the files
+	newPaths, err := moveImageFiles(req.Bucket, img, req.DestPrefix)
+	if err != nil {
+		fmt.Printf("Error moving files: %v\n", err)
+		// Update status to failed
+		ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(req.ImageGUID)},
+			},
+			UpdateExpression: aws.String("SET MoveStatus = :status"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":status": {S: aws.String("failed")},
+			},
+		})
+		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: fmt.Sprintf(`{"success": false, "error": "%v"}`, err)}, nil
+	}
+
+	// Update DynamoDB with new paths and complete status
+	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(req.ImageGUID)},
+		},
+		UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :newStatus, MoveStatus = :moveStatus, UpdatedDateTime = :updated"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":orig":       {S: aws.String(newPaths["original"])},
+			":t50":        {S: aws.String(newPaths["thumbnail50"])},
+			":t400":       {S: aws.String(newPaths["thumbnail400"])},
+			":newStatus":  {S: aws.String(req.NewStatus)},
+			":moveStatus": {S: aws.String("complete")},
+			":updated":    {S: aws.String(time.Now().Format(time.RFC3339))},
+		},
+		ExpressionAttributeNames: map[string]*string{
+			"#status": aws.String("Status"),
+		},
+	})
+	if err != nil {
+		fmt.Printf("Error updating image after move: %v\n", err)
+		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: fmt.Sprintf(`{"success": false, "error": "%v"}`, err)}, nil
+	}
+
+	fmt.Printf("Async move completed for image %s\n", req.ImageGUID)
+	return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": true}`}, nil
+}
+
+// triggerAsyncMove invokes Lambda asynchronously to move files
+func triggerAsyncMove(imageGUID, destPrefix, newStatus, bucket string) error {
+	payload, err := json.Marshal(AsyncMoveRequest{
+		Action:     "move_files",
+		ImageGUID:  imageGUID,
+		DestPrefix: destPrefix,
+		NewStatus:  newStatus,
+		Bucket:     bucket,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal async request: %v", err)
+	}
+
+	// Wrap payload in API Gateway format for the handler
+	wrappedPayload, _ := json.Marshal(map[string]string{
+		"body": string(payload),
+	})
+
+	_, err = lambdaClient.Invoke(&lambdasvc.InvokeInput{
+		FunctionName:   aws.String(functionName),
+		InvocationType: aws.String("Event"), // Async invocation
+		Payload:        wrappedPayload,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to invoke lambda: %v", err)
+	}
+
+	return nil
 }
 
 func getColorName(groupNumber int) string {
@@ -469,6 +601,14 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		"Access-Control-Allow-Origin": "*",
 		"Access-Control-Allow-Headers": "Content-Type,Authorization",
 		"Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+	}
+
+	// Check if this is an async move request (direct Lambda invocation)
+	if request.Body != "" && request.HTTPMethod == "" && request.Path == "" {
+		var asyncReq AsyncMoveRequest
+		if err := json.Unmarshal([]byte(request.Body), &asyncReq); err == nil && asyncReq.Action == "move_files" {
+			return handleAsyncMoveFiles(asyncReq, headers)
+		}
 	}
 
 	// Handle OPTIONS requests for CORS
@@ -692,7 +832,8 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 	dynamodbattribute.UnmarshalMap(getResult.Item, &img)
 
 	// Check if this is a new review (moving from unreviewed to reviewed)
-	var newPaths map[string]string
+	var triggerMove bool
+	var destPrefix string
 	var newStatus string
 
 	if updateReq.Reviewed == "true" && img.Reviewed == "false" {
@@ -702,24 +843,14 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		if updateReq.GroupNumber > 0 {
 			// Approved with a group - move to approved/<color>/YYYY/MM/DD
 			colorName := getColorName(updateReq.GroupNumber)
-			destPrefix := fmt.Sprintf("approved/%s/%s", colorName, datePath)
+			destPrefix = fmt.Sprintf("approved/%s/%s", colorName, datePath)
 			newStatus = "approved"
-
-			newPaths, err = moveImageFiles(bucketName, img, destPrefix)
-			if err != nil {
-				fmt.Printf("Error moving files to approved: %v\n", err)
-				return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
-			}
+			triggerMove = true
 		} else {
 			// Rejected (group 0) - move to rejected/YYYY/MM/DD
-			destPrefix := "rejected/" + datePath
+			destPrefix = "rejected/" + datePath
 			newStatus = "rejected"
-
-			newPaths, err = moveImageFiles(bucketName, img, destPrefix)
-			if err != nil {
-				fmt.Printf("Error moving files to rejected: %v\n", err)
-				return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
-			}
+			triggerMove = true
 		}
 	}
 
@@ -767,14 +898,10 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		exprAttrValues[":reviewed"] = &dynamodb.AttributeValue{S: aws.String(updateReq.Reviewed)}
 	}
 
-	// Add file path updates if files were moved
-	if newPaths != nil {
-		updateExpr += ", OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status"
-		exprAttrValues[":orig"] = &dynamodb.AttributeValue{S: aws.String(newPaths["original"])}
-		exprAttrValues[":t50"] = &dynamodb.AttributeValue{S: aws.String(newPaths["thumbnail50"])}
-		exprAttrValues[":t400"] = &dynamodb.AttributeValue{S: aws.String(newPaths["thumbnail400"])}
-		exprAttrValues[":status"] = &dynamodb.AttributeValue{S: aws.String(newStatus)}
-		exprAttrNames["#status"] = aws.String("Status")
+	// Set move status to pending if we need to trigger async move
+	if triggerMove {
+		updateExpr += ", MoveStatus = :moveStatus"
+		exprAttrValues[":moveStatus"] = &dynamodb.AttributeValue{S: aws.String("pending")}
 	}
 
 	// Update the image metadata
@@ -811,6 +938,14 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		TableName: aws.String(reviewGroupsTable),
 		Item:      reviewItem,
 	})
+
+	// Trigger async file move if needed
+	if triggerMove {
+		if err := triggerAsyncMove(imageID, destPrefix, newStatus, bucketName); err != nil {
+			fmt.Printf("Error triggering async move: %v\n", err)
+			// Don't fail the request - the move status will show the issue
+		}
+	}
 
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
