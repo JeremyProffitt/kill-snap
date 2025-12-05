@@ -51,6 +51,10 @@ Resources:
           AttributeType: S
         - AttributeName: Reviewed
           AttributeType: S
+        - AttributeName: Status
+          AttributeType: S
+        - AttributeName: ProjectID
+          AttributeType: S
       KeySchema:
         - AttributeName: ImageGUID
           KeyType: HASH
@@ -58,6 +62,22 @@ Resources:
         - IndexName: ReviewedIndex
           KeySchema:
             - AttributeName: Reviewed
+              KeyType: HASH
+            - AttributeName: ImageGUID
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: Status
+              KeyType: HASH
+            - AttributeName: ImageGUID
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ProjectIndex
+          KeySchema:
+            - AttributeName: ProjectID
               KeyType: HASH
             - AttributeName: ImageGUID
               KeyType: RANGE
@@ -97,6 +117,21 @@ Resources:
           KeyType: HASH
         - AttributeName: ImageGUID
           KeyType: RANGE
+
+  # DynamoDB table for projects
+  ProjectsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: kill-snap-Projects
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ProjectID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ProjectID
+          KeyType: HASH
 
   # Lambda function for thumbnail generation
   ThumbnailFunction:
@@ -164,6 +199,7 @@ Resources:
           IMAGE_TABLE: !Ref ImageMetadataTable
           USERS_TABLE: !Ref UsersTable
           REVIEW_GROUPS_TABLE: !Ref ReviewGroupsTable
+          PROJECTS_TABLE: !Ref ProjectsTable
           ADMIN_USERNAME: !Ref AdminUsername
           ADMIN_PASSWORD: !Ref AdminPassword
       Policies:
@@ -191,6 +227,7 @@ Resources:
                 - !Sub ${ImageMetadataTable.Arn}/index/*
                 - !GetAtt UsersTable.Arn
                 - !GetAtt ReviewGroupsTable.Arn
+                - !GetAtt ProjectsTable.Arn
       Events:
         Login:
           Type: Api
@@ -221,6 +258,30 @@ Resources:
           Properties:
             RestApiId: !Ref ImageReviewApi
             Path: /api/images/{imageId}/download
+            Method: GET
+        ListProjects:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects
+            Method: GET
+        CreateProject:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects
+            Method: POST
+        AddToProject:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/images
+            Method: POST
+        GetProjectImages:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/images
             Method: GET
 
   # CloudFront Origin Access Control
@@ -442,6 +503,10 @@ Outputs:
   ReviewGroupsTableName:
     Description: Review Groups DynamoDB Table Name
     Value: !Ref ReviewGroupsTable
+
+  ProjectsTableName:
+    Description: Projects DynamoDB Table Name
+    Value: !Ref ProjectsTable
 
   ThumbnailLambdaArn:
     Description: Thumbnail Lambda Function ARN

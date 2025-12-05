@@ -13,6 +13,8 @@ export interface Image {
   promoted?: boolean;
   exifData?: Record<string, string>;
   relatedFiles?: string[];
+  status?: 'inbox' | 'approved' | 'rejected' | 'deleted' | 'project';
+  projectId?: string;
 }
 
 export interface LoginRequest {
@@ -29,4 +31,16 @@ export interface UpdateImageRequest {
   colorCode?: string;
   promoted?: boolean;
   reviewed?: string;
+}
+
+export interface Project {
+  projectId: string;
+  name: string;
+  createdAt: string;
+  imageCount: number;
+}
+
+export interface AddToProjectRequest {
+  all?: boolean;
+  group?: number;
 }

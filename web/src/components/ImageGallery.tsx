@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, ImageFilters } from '../services/api';
 import { authService } from '../services/auth';
-import { Image } from '../types';
+import { Image, Project } from '../types';
 import { ImageModal } from './ImageModal';
+import { ProjectModal } from './ProjectModal';
 import './ImageGallery.css';
 
 interface ImageGalleryProps {
@@ -31,15 +32,36 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<StateFilter>('unreviewed');
   const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>('');
+  const [showProjectModal, setShowProjectModal] = useState(false);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const data = await api.getProjects();
+      setProjects(data);
+    } catch (err: any) {
+      console.error('Failed to load projects:', err);
+    }
+  }, []);
 
   const loadImages = useCallback(async () => {
     try {
       setLoading(true);
-      const filters: ImageFilters = {
-        state: stateFilter,
-        group: groupFilter,
-      };
-      const data = await api.getImages(filters);
+      let data: Image[];
+
+      if (selectedProject) {
+        // Load images from selected project
+        data = await api.getProjectImages(selectedProject);
+      } else {
+        // Load images with filters
+        const filters: ImageFilters = {
+          state: stateFilter,
+          group: groupFilter,
+        };
+        data = await api.getImages(filters);
+      }
+
       setImages(data);
       setError('');
     } catch (err: any) {
@@ -52,7 +74,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [stateFilter, groupFilter, onLogout]);
+  }, [stateFilter, groupFilter, selectedProject, onLogout]);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
 
   useEffect(() => {
     loadImages();
@@ -133,6 +159,20 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     onLogout();
   };
 
+  const handleProjectCreated = () => {
+    loadProjects();
+    loadImages();
+  };
+
+  const handleProjectChange = (projectId: string) => {
+    setSelectedProject(projectId);
+    if (projectId) {
+      // Clear filters when viewing a project
+      setStateFilter('all');
+      setGroupFilter('all');
+    }
+  };
+
   const getStateLabel = () => {
     switch (stateFilter) {
       case 'unreviewed': return 'unreviewed';
@@ -150,36 +190,63 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         <h1>Image Review</h1>
         <div className="header-controls">
           <div className="filter-group">
-            <label>Status:</label>
+            <label>View:</label>
             <select
-              value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value as StateFilter)}
-              className="filter-select"
+              value={selectedProject}
+              onChange={(e) => handleProjectChange(e.target.value)}
+              className="filter-select project-select"
             >
-              <option value="unreviewed">Unreviewed</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Group:</label>
-            <select
-              value={groupFilter}
-              onChange={(e) => setGroupFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-              className="filter-select"
-            >
-              <option value="all">All Groups</option>
-              {GROUP_COLORS.map((group) => (
-                <option key={group.number} value={group.number}>
-                  {group.number}: {group.name}
+              <option value="">Inbox</option>
+              {projects.map((project) => (
+                <option key={project.projectId} value={project.projectId}>
+                  {project.name} ({project.imageCount})
                 </option>
               ))}
             </select>
           </div>
+          {!selectedProject && (
+            <>
+              <div className="filter-group">
+                <label>Status:</label>
+                <select
+                  value={stateFilter}
+                  onChange={(e) => setStateFilter(e.target.value as StateFilter)}
+                  className="filter-select"
+                >
+                  <option value="unreviewed">Unreviewed</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
+              <div className="filter-group">
+                <label>Group:</label>
+                <select
+                  value={groupFilter}
+                  onChange={(e) => setGroupFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                  className="filter-select"
+                >
+                  <option value="all">All Groups</option>
+                  {GROUP_COLORS.map((group) => (
+                    <option key={group.number} value={group.number}>
+                      {group.number}: {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+          <button
+            onClick={() => setShowProjectModal(true)}
+            className="projects-button"
+          >
+            Projects
+          </button>
         </div>
         <div className="header-actions">
-          <span className="image-count">{images.length} {getStateLabel()} images</span>
+          <span className="image-count">
+            {images.length} {selectedProject ? 'project' : getStateLabel()} images
+          </span>
           <button onClick={handleLogout} className="logout-button">
             Logout
           </button>
@@ -269,6 +336,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           hasNext={selectedImageIndex! < images.length - 1}
           currentIndex={selectedImageIndex!}
           totalImages={images.length}
+        />
+      )}
+
+      {showProjectModal && (
+        <ProjectModal
+          onClose={() => setShowProjectModal(false)}
+          onProjectCreated={handleProjectCreated}
+          existingProjects={projects}
         />
       )}
     </div>

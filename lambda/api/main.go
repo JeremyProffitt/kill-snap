@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -27,6 +30,7 @@ var (
 	imageTable        string
 	usersTable        string
 	reviewGroupsTable string
+	projectsTable     string
 	adminUsername     string
 	adminPassword     string
 	jwtSecret         = []byte("kill-snap-secret-key-change-in-production")
@@ -40,6 +44,7 @@ func init() {
 	imageTable = os.Getenv("IMAGE_TABLE")
 	usersTable = os.Getenv("USERS_TABLE")
 	reviewGroupsTable = os.Getenv("REVIEW_GROUPS_TABLE")
+	projectsTable = os.Getenv("PROJECTS_TABLE")
 	adminUsername = os.Getenv("ADMIN_USERNAME")
 	adminPassword = os.Getenv("ADMIN_PASSWORD")
 
@@ -82,6 +87,22 @@ type UpdateImageRequest struct {
 	ColorCode   string `json:"colorCode,omitempty"`
 	Promoted    bool   `json:"promoted,omitempty"`
 	Reviewed    string `json:"reviewed,omitempty"`
+}
+
+type Project struct {
+	ProjectID  string `json:"projectId"`
+	Name       string `json:"name"`
+	CreatedAt  string `json:"createdAt"`
+	ImageCount int    `json:"imageCount"`
+}
+
+type CreateProjectRequest struct {
+	Name string `json:"name"`
+}
+
+type AddToProjectRequest struct {
+	All   bool `json:"all,omitempty"`
+	Group int  `json:"group,omitempty"`
 }
 
 func initializeAdminUser() {
@@ -131,6 +152,98 @@ func initializeAdminUser() {
 	}
 }
 
+// getImageDate extracts date from EXIF or falls back to InsertedDateTime
+func getImageDate(img ImageResponse) time.Time {
+	// Try EXIF DateTimeOriginal first
+	if dateStr, ok := img.EXIFData["DateTimeOriginal"]; ok {
+		cleaned := strings.Trim(dateStr, "\"")
+		if t, err := time.Parse("2006:01:02 15:04:05", cleaned); err == nil {
+			return t
+		}
+	}
+	// Try DateTime
+	if dateStr, ok := img.EXIFData["DateTime"]; ok {
+		cleaned := strings.Trim(dateStr, "\"")
+		if t, err := time.Parse("2006:01:02 15:04:05", cleaned); err == nil {
+			return t
+		}
+	}
+	// Fall back to InsertedDateTime
+	if t, err := time.Parse(time.RFC3339, img.InsertedDateTime); err == nil {
+		return t
+	}
+	return time.Now()
+}
+
+// buildDatePath returns YYYY/MM/DD format
+func buildDatePath(t time.Time) string {
+	return fmt.Sprintf("%d/%02d/%02d", t.Year(), int(t.Month()), t.Day())
+}
+
+// moveImageFiles moves original, thumbnails, and related files to new location
+func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[string]string, error) {
+	newPaths := make(map[string]string)
+
+	// Move original file
+	origFilename := filepath.Base(img.OriginalFile)
+	newOriginal := destPrefix + "/" + origFilename
+	if err := copyS3Object(bucket, img.OriginalFile, newOriginal); err != nil {
+		return nil, fmt.Errorf("failed to copy original: %v", err)
+	}
+	deleteS3Object(bucket, img.OriginalFile)
+	newPaths["original"] = newOriginal
+
+	// Move thumbnails
+	thumb50Name := filepath.Base(img.Thumbnail50)
+	newThumb50 := destPrefix + "/" + thumb50Name
+	copyS3Object(bucket, img.Thumbnail50, newThumb50)
+	deleteS3Object(bucket, img.Thumbnail50)
+	newPaths["thumbnail50"] = newThumb50
+
+	thumb400Name := filepath.Base(img.Thumbnail400)
+	newThumb400 := destPrefix + "/" + thumb400Name
+	copyS3Object(bucket, img.Thumbnail400, newThumb400)
+	deleteS3Object(bucket, img.Thumbnail400)
+	newPaths["thumbnail400"] = newThumb400
+
+	// Move related files (same base name, different extensions)
+	for _, relFile := range img.RelatedFiles {
+		relName := filepath.Base(relFile)
+		newRelPath := destPrefix + "/" + relName
+		copyS3Object(bucket, relFile, newRelPath)
+		deleteS3Object(bucket, relFile)
+	}
+
+	return newPaths, nil
+}
+
+func copyS3Object(bucket, srcKey, dstKey string) error {
+	_, err := s3Client.CopyObject(&s3.CopyObjectInput{
+		Bucket:     aws.String(bucket),
+		CopySource: aws.String(url.PathEscape(bucket + "/" + srcKey)),
+		Key:        aws.String(dstKey),
+	})
+	return err
+}
+
+func deleteS3Object(bucket, key string) {
+	s3Client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+}
+
+func getColorName(groupNumber int) string {
+	colors := map[int]string{
+		0: "none", 1: "red", 2: "blue", 3: "green", 4: "yellow",
+		5: "purple", 6: "orange", 7: "pink", 8: "brown",
+	}
+	if name, ok := colors[groupNumber]; ok {
+		return name
+	}
+	return "none"
+}
+
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	headers := map[string]string{
 		"Content-Type":                "application/json",
@@ -178,6 +291,17 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/images/") && method == "DELETE":
 		imageID := strings.TrimPrefix(path, "/api/images/")
 		return handleDeleteImage(imageID, headers)
+	// Project routes
+	case path == "/api/projects" && method == "GET":
+		return handleListProjects(headers)
+	case path == "/api/projects" && method == "POST":
+		return handleCreateProject(request, headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/images") && method == "POST":
+		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/images")
+		return handleAddToProject(projectID, request, headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/images") && method == "GET":
+		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/images")
+		return handleGetProjectImages(projectID, headers)
 	default:
 		return errorResponse(404, "Not found", headers)
 	}
@@ -328,63 +452,99 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		return errorResponse(400, "Invalid request body", headers)
 	}
 
-	// Build update expression
-	updateExpr := "SET "
-	exprAttrValues := make(map[string]*dynamodb.AttributeValue)
-	first := true
-
-	// Always set GroupNumber (0 means rejected/no group)
-	if !first {
-		updateExpr += ", "
+	// Get current image metadata to check if this is a new review
+	getResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageID)},
+		},
+	})
+	if err != nil || getResult.Item == nil {
+		return errorResponse(404, "Image not found", headers)
 	}
-	updateExpr += "GroupNumber = :group"
-	exprAttrValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", updateReq.GroupNumber))}
-	first = false
+
+	var img ImageResponse
+	dynamodbattribute.UnmarshalMap(getResult.Item, &img)
+
+	// Check if this is a new review (moving from unreviewed to reviewed)
+	var newPaths map[string]string
+	var newStatus string
+
+	if updateReq.Reviewed == "true" && img.Reviewed == "false" {
+		imageDate := getImageDate(img)
+		datePath := buildDatePath(imageDate)
+
+		if updateReq.GroupNumber > 0 {
+			// Approved with a group - move to approved/<color>/YYYY/MM/DD
+			colorName := getColorName(updateReq.GroupNumber)
+			destPrefix := fmt.Sprintf("approved/%s/%s", colorName, datePath)
+			newStatus = "approved"
+
+			newPaths, err = moveImageFiles(bucketName, img, destPrefix)
+			if err != nil {
+				fmt.Printf("Error moving files to approved: %v\n", err)
+				return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
+			}
+		} else {
+			// Rejected (group 0) - move to rejected/YYYY/MM/DD
+			destPrefix := "rejected/" + datePath
+			newStatus = "rejected"
+
+			newPaths, err = moveImageFiles(bucketName, img, destPrefix)
+			if err != nil {
+				fmt.Printf("Error moving files to rejected: %v\n", err)
+				return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
+			}
+		}
+	}
+
+	// Build update expression
+	updateExpr := "SET GroupNumber = :group, UpdatedDateTime = :updated"
+	exprAttrValues := map[string]*dynamodb.AttributeValue{
+		":group":   {N: aws.String(fmt.Sprintf("%d", updateReq.GroupNumber))},
+		":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+	}
+	exprAttrNames := make(map[string]*string)
 
 	if updateReq.ColorCode != "" {
-		if !first {
-			updateExpr += ", "
-		}
-		updateExpr += "ColorCode = :color"
+		updateExpr += ", ColorCode = :color"
 		exprAttrValues[":color"] = &dynamodb.AttributeValue{S: aws.String(updateReq.ColorCode)}
-		first = false
 	}
 
 	if updateReq.Promoted {
-		if !first {
-			updateExpr += ", "
-		}
-		updateExpr += "Promoted = :promoted"
+		updateExpr += ", Promoted = :promoted"
 		exprAttrValues[":promoted"] = &dynamodb.AttributeValue{BOOL: aws.Bool(true)}
-		first = false
 	}
 
 	if updateReq.Reviewed != "" {
-		if !first {
-			updateExpr += ", "
-		}
-		updateExpr += "Reviewed = :reviewed"
+		updateExpr += ", Reviewed = :reviewed"
 		exprAttrValues[":reviewed"] = &dynamodb.AttributeValue{S: aws.String(updateReq.Reviewed)}
-		first = false
 	}
 
-	// Always update UpdatedDateTime
-	if !first {
-		updateExpr += ", "
+	// Add file path updates if files were moved
+	if newPaths != nil {
+		updateExpr += ", OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status"
+		exprAttrValues[":orig"] = &dynamodb.AttributeValue{S: aws.String(newPaths["original"])}
+		exprAttrValues[":t50"] = &dynamodb.AttributeValue{S: aws.String(newPaths["thumbnail50"])}
+		exprAttrValues[":t400"] = &dynamodb.AttributeValue{S: aws.String(newPaths["thumbnail400"])}
+		exprAttrValues[":status"] = &dynamodb.AttributeValue{S: aws.String(newStatus)}
+		exprAttrNames["#status"] = aws.String("Status")
 	}
-	updateExpr += "UpdatedDateTime = :updated"
-	exprAttrValues[":updated"] = &dynamodb.AttributeValue{S: aws.String(time.Now().Format(time.RFC3339))}
 
 	// Update the image metadata
-	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+	updateInput := &dynamodb.UpdateItemInput{
 		TableName: aws.String(imageTable),
 		Key: map[string]*dynamodb.AttributeValue{
 			"ImageGUID": {S: aws.String(imageID)},
 		},
 		UpdateExpression:          aws.String(updateExpr),
 		ExpressionAttributeValues: exprAttrValues,
-	})
+	}
+	if len(exprAttrNames) > 0 {
+		updateInput.ExpressionAttributeNames = exprAttrNames
+	}
 
+	_, err = ddbClient.UpdateItem(updateInput)
 	if err != nil {
 		fmt.Printf("Error updating image: %v\n", err)
 		return errorResponse(500, "Failed to update image", headers)
@@ -464,27 +624,245 @@ func handleDeleteImage(imageID string, headers map[string]string) (events.APIGat
 	var img ImageResponse
 	dynamodbattribute.UnmarshalMap(result.Item, &img)
 
-	// Delete from S3
-	filesToDelete := []string{img.OriginalFile, img.Thumbnail50, img.Thumbnail400}
-	for _, file := range filesToDelete {
-		s3Client.DeleteObject(&s3.DeleteObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(file),
-		})
+	// Get date from EXIF for folder structure
+	imageDate := getImageDate(img)
+	datePath := buildDatePath(imageDate)
+	destPrefix := "deleted/" + datePath
+
+	// Move all files to deleted folder
+	newPaths, err := moveImageFiles(bucketName, img, destPrefix)
+	if err != nil {
+		fmt.Printf("Error moving files: %v\n", err)
+		return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
 	}
 
-	// Delete from DynamoDB
-	ddbClient.DeleteItem(&dynamodb.DeleteItemInput{
+	// Update DynamoDB with new paths and status (instead of deleting)
+	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
 		TableName: aws.String(imageTable),
 		Key: map[string]*dynamodb.AttributeValue{
 			"ImageGUID": {S: aws.String(imageID)},
 		},
+		UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status, UpdatedDateTime = :updated"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":orig":    {S: aws.String(newPaths["original"])},
+			":t50":     {S: aws.String(newPaths["thumbnail50"])},
+			":t400":    {S: aws.String(newPaths["thumbnail400"])},
+			":status":  {S: aws.String("deleted")},
+			":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+		},
+		ExpressionAttributeNames: map[string]*string{
+			"#status": aws.String("Status"),
+		},
 	})
+
+	if err != nil {
+		fmt.Printf("Error updating metadata: %v\n", err)
+		return errorResponse(500, "Failed to update metadata", headers)
+	}
 
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers:    headers,
 		Body:       `{"success": true}`,
+	}, nil
+}
+
+// Project handlers
+
+func handleListProjects(headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	result, err := ddbClient.Scan(&dynamodb.ScanInput{
+		TableName: aws.String(projectsTable),
+	})
+	if err != nil {
+		fmt.Printf("Error listing projects: %v\n", err)
+		return errorResponse(500, "Failed to list projects", headers)
+	}
+
+	projects := make([]Project, 0)
+	for _, item := range result.Items {
+		var p Project
+		dynamodbattribute.UnmarshalMap(item, &p)
+		projects = append(projects, p)
+	}
+
+	body, _ := json.Marshal(projects)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleCreateProject(request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	var req CreateProjectRequest
+	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		return errorResponse(400, "Invalid request body", headers)
+	}
+
+	if req.Name == "" {
+		return errorResponse(400, "Project name is required", headers)
+	}
+
+	project := Project{
+		ProjectID:  uuid.New().String(),
+		Name:       req.Name,
+		CreatedAt:  time.Now().Format(time.RFC3339),
+		ImageCount: 0,
+	}
+
+	av, _ := dynamodbattribute.MarshalMap(project)
+	_, err := ddbClient.PutItem(&dynamodb.PutItemInput{
+		TableName: aws.String(projectsTable),
+		Item:      av,
+	})
+	if err != nil {
+		fmt.Printf("Error creating project: %v\n", err)
+		return errorResponse(500, "Failed to create project", headers)
+	}
+
+	body, _ := json.Marshal(project)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 201,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleAddToProject(projectID string, request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	var req AddToProjectRequest
+	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		return errorResponse(400, "Invalid request body", headers)
+	}
+
+	// Get project to verify it exists
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	// Query approved images (Status = 'approved')
+	queryInput := &dynamodb.QueryInput{
+		TableName:              aws.String(imageTable),
+		IndexName:              aws.String("StatusIndex"),
+		KeyConditionExpression: aws.String("#status = :status"),
+		ExpressionAttributeNames: map[string]*string{
+			"#status": aws.String("Status"),
+		},
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":status": {S: aws.String("approved")},
+		},
+	}
+
+	// Add group filter if not "all"
+	if !req.All && req.Group > 0 {
+		queryInput.FilterExpression = aws.String("GroupNumber = :group")
+		queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{
+			N: aws.String(fmt.Sprintf("%d", req.Group)),
+		}
+	}
+
+	result, err := ddbClient.Query(queryInput)
+	if err != nil {
+		fmt.Printf("Error querying approved images: %v\n", err)
+		return errorResponse(500, "Failed to query images", headers)
+	}
+
+	// Move each image to project folder
+	movedCount := 0
+	for _, item := range result.Items {
+		var img ImageResponse
+		dynamodbattribute.UnmarshalMap(item, &img)
+
+		imageDate := getImageDate(img)
+		datePath := buildDatePath(imageDate)
+		destPrefix := fmt.Sprintf("projects/%s/%s", project.Name, datePath)
+
+		newPaths, err := moveImageFiles(bucketName, img, destPrefix)
+		if err != nil {
+			fmt.Printf("Failed to move image %s: %v\n", img.ImageGUID, err)
+			continue
+		}
+
+		// Update image record
+		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(img.ImageGUID)},
+			},
+			UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status, ProjectID = :proj, UpdatedDateTime = :updated"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":orig":    {S: aws.String(newPaths["original"])},
+				":t50":     {S: aws.String(newPaths["thumbnail50"])},
+				":t400":    {S: aws.String(newPaths["thumbnail400"])},
+				":status":  {S: aws.String("project")},
+				":proj":    {S: aws.String(projectID)},
+				":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+			},
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
+		})
+		if err != nil {
+			fmt.Printf("Failed to update image record %s: %v\n", img.ImageGUID, err)
+			continue
+		}
+		movedCount++
+	}
+
+	// Update project image count
+	ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+		UpdateExpression: aws.String("ADD ImageCount :count"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":count": {N: aws.String(fmt.Sprintf("%d", movedCount))},
+		},
+	})
+
+	body, _ := json.Marshal(map[string]int{"movedCount": movedCount})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleGetProjectImages(projectID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	result, err := ddbClient.Query(&dynamodb.QueryInput{
+		TableName:              aws.String(imageTable),
+		IndexName:              aws.String("ProjectIndex"),
+		KeyConditionExpression: aws.String("ProjectID = :pid"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":pid": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil {
+		fmt.Printf("Error querying project images: %v\n", err)
+		return errorResponse(500, "Failed to query images", headers)
+	}
+
+	images := make([]ImageResponse, 0)
+	for _, item := range result.Items {
+		var img ImageResponse
+		dynamodbattribute.UnmarshalMap(item, &img)
+		images = append(images, img)
+	}
+
+	body, _ := json.Marshal(images)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
 	}, nil
 }
 

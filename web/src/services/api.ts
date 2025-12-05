@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
-import { Image, UpdateImageRequest } from '../types';
+import { Image, UpdateImageRequest, Project, AddToProjectRequest } from '../types';
 
 export interface ImageFilters {
   state?: 'unreviewed' | 'approved' | 'rejected' | 'all';
@@ -57,5 +57,39 @@ export const api = {
       return `${IMAGE_CDN_URL}/${key}`;
     }
     return `https://${bucket}.s3.amazonaws.com/${key}`;
+  },
+
+  async getProjects(): Promise<Project[]> {
+    const response = await axios.get<Project[]>(
+      `${API_BASE_URL}/api/projects`,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
+
+  async createProject(name: string): Promise<Project> {
+    const response = await axios.post<Project>(
+      `${API_BASE_URL}/api/projects`,
+      { name },
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
+
+  async addToProject(projectId: string, filters: AddToProjectRequest): Promise<{ movedCount: number }> {
+    const response = await axios.post<{ movedCount: number }>(
+      `${API_BASE_URL}/api/projects/${projectId}/images`,
+      filters,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
+
+  async getProjectImages(projectId: string): Promise<Image[]> {
+    const response = await axios.get<Image[]>(
+      `${API_BASE_URL}/api/projects/${projectId}/images`,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
   },
 };

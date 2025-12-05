@@ -84,6 +84,47 @@ jobs:
 
           echo "bucket_name=${IMAGE_BUCKET}" >> $GITHUB_OUTPUT
 
+      - name: Configure S3 lifecycle policies
+        run: |
+          IMAGE_BUCKET="${{ vars.S3_BUCKET }}"
+
+          echo "Configuring lifecycle policies for bucket: ${IMAGE_BUCKET}"
+
+          cat > /tmp/lifecycle.json <<'EOF'
+          {
+            "Rules": [
+              {
+                "ID": "DeleteAfter90Days",
+                "Filter": {
+                  "Prefix": "deleted/"
+                },
+                "Status": "Enabled",
+                "Expiration": {
+                  "Days": 90
+                }
+              },
+              {
+                "ID": "DeleteRejectedAfter1Year",
+                "Filter": {
+                  "Prefix": "rejected/"
+                },
+                "Status": "Enabled",
+                "Expiration": {
+                  "Days": 365
+                }
+              }
+            ]
+          }
+          EOF
+
+          aws s3api put-bucket-lifecycle-configuration \
+            --bucket "${IMAGE_BUCKET}" \
+            --lifecycle-configuration file:///tmp/lifecycle.json
+
+          echo "S3 lifecycle policies configured:"
+          echo "  - deleted/ folder: 90-day expiration"
+          echo "  - rejected/ folder: 365-day expiration"
+
       - name: Build SAM application
         run: |
           sam build
