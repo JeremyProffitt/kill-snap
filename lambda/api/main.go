@@ -384,8 +384,8 @@ func generateProjectCatalog(project Project, images []ImageResponse) error {
 		return fmt.Errorf("failed to read catalog: %v", err)
 	}
 
-	// Upload to S3 at projects/<name>/project.lrcat
-	s3Key := fmt.Sprintf("projects/%s/project.lrcat", project.Name)
+	// Upload to S3 at projects/<projectId>/project.lrcat (use ID for safe paths)
+	s3Key := fmt.Sprintf("projects/%s/project.lrcat", project.ProjectID)
 	_, err = s3Client.PutObject(&s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(s3Key),
@@ -925,7 +925,7 @@ func handleCreateProject(request events.APIGatewayProxyRequest, headers map[stri
 		fmt.Printf("Warning: failed to generate initial catalog: %v\n", err)
 		// Don't fail project creation if catalog generation fails
 	} else {
-		project.CatalogPath = fmt.Sprintf("projects/%s/project.lrcat", project.Name)
+		project.CatalogPath = fmt.Sprintf("projects/%s/project.lrcat", project.ProjectID)
 		project.CatalogUpdatedAt = time.Now().Format(time.RFC3339)
 	}
 
@@ -992,7 +992,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 
 		imageDate := getImageDate(img)
 		datePath := buildDatePath(imageDate)
-		destPrefix := fmt.Sprintf("projects/%s/%s", project.Name, datePath)
+		destPrefix := fmt.Sprintf("projects/%s/%s", project.ProjectID, datePath)
 
 		newPaths, err := moveImageFiles(bucketName, img, destPrefix)
 		if err != nil {

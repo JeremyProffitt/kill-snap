@@ -276,12 +276,24 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
               className={`gallery-item ${processingId === image.imageGUID ? 'processing' : ''}`}
               onClick={() => handleImageClick(index)}
             >
-              <div className="thumbnail-container">
+              <div
+                className="thumbnail-container"
+                style={{
+                  aspectRatio: image.width && image.height
+                    ? `${image.width} / ${image.height}`
+                    : '1 / 1'
+                }}
+              >
                 <img
                   src={api.getImageUrl(image.bucket, image.thumbnail400)}
                   alt={image.originalFile}
                   className="thumbnail"
                 />
+                {(image.rating ?? 0) > 0 && (
+                  <div className="thumbnail-rating">
+                    {renderStars(image.rating ?? 0)}
+                  </div>
+                )}
                 <div className="quick-actions-overlay">
                   <button
                     type="button"
