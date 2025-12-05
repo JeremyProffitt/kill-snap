@@ -53,8 +53,6 @@ Resources:
           AttributeType: S
         - AttributeName: Status
           AttributeType: S
-        - AttributeName: ProjectID
-          AttributeType: S
       KeySchema:
         - AttributeName: ImageGUID
           KeyType: HASH
@@ -75,14 +73,8 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-        - IndexName: ProjectIndex
-          KeySchema:
-            - AttributeName: ProjectID
-              KeyType: HASH
-            - AttributeName: ImageGUID
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
+        # ProjectIndex will be added in a follow-up deployment
+        # (DynamoDB only allows one GSI addition per update)
 
   # DynamoDB table for users
   UsersTable:
