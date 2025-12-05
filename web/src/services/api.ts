@@ -4,7 +4,7 @@ import { authService } from './auth';
 import { Image, UpdateImageRequest, Project, AddToProjectRequest, CatalogDownloadResponse } from '../types';
 
 export interface ImageFilters {
-  state?: 'unreviewed' | 'approved' | 'rejected' | 'all';
+  state?: 'unreviewed' | 'approved' | 'rejected' | 'deleted' | 'all';
   group?: number | 'all';
 }
 

@@ -20,7 +20,7 @@ const GROUP_COLORS = [
   { number: 5, color: '#9b59b6', name: 'Purple' },
 ];
 
-type StateFilter = 'unreviewed' | 'approved' | 'rejected' | 'all';
+type StateFilter = 'unreviewed' | 'approved' | 'rejected' | 'deleted' | 'all';
 
 // Helper to render star rating
 const renderStars = (rating: number, maxStars: number = 5) => {
@@ -144,10 +144,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     e.preventDefault();
     if (processingId) return;
 
-    if (action === 'delete') {
-      if (!window.confirm('Delete this image?')) return;
-    }
-
     setProcessingId(image.imageGUID);
     try {
       if (action === 'delete') {
@@ -200,6 +196,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       case 'unreviewed': return 'unreviewed';
       case 'approved': return 'approved';
       case 'rejected': return 'rejected';
+      case 'deleted': return 'deleted';
       case 'all': return 'total';
     }
   };
@@ -238,6 +235,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   <option value="unreviewed">Unreviewed</option>
                   <option value="approved">Approved</option>
                   <option value="rejected">Rejected</option>
+                  <option value="deleted">Deleted</option>
                   <option value="all">All</option>
                 </select>
               </div>

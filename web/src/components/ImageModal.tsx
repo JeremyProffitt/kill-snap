@@ -102,9 +102,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   }, [image.imageGUID, onUpdate]);
 
   const handleDelete = useCallback(async () => {
-    if (!window.confirm('Are you sure you want to delete this image?')) {
-      return;
-    }
     setLoading(true);
     try {
       await api.deleteImage(image.imageGUID);
@@ -273,61 +270,97 @@ export const ImageModal: React.FC<ImageModalProps> = ({
               src={api.getImageUrl(image.bucket, image.thumbnail400)}
               alt={image.originalFile}
             />
+            {/* Image overlay with filename, dimensions, stars, and action icons */}
+            <div className="image-overlay">
+              <div className="overlay-bottom-left">
+                <span className="overlay-filename">{getFilename(image.originalFile)}</span>
+                <span className="overlay-filesize">{formatFileSize(image.fileSize)}</span>
+              </div>
+              <div className="overlay-center">
+                <div className="overlay-stars">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      className={`overlay-star-btn ${rating >= star ? 'filled' : 'empty'}`}
+                      onClick={() => handleRatingSelect(star === rating ? 0 : star)}
+                      disabled={loading}
+                    >
+                      {rating >= star ? '★' : '☆'}
+                    </button>
+                  ))}
+                </div>
+                <div className="overlay-actions">
+                  <button
+                    type="button"
+                    className="overlay-btn approve"
+                    onClick={handleApprove}
+                    disabled={loading}
+                    title="Approve (Enter)"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    className="overlay-btn reject"
+                    onClick={handleReject}
+                    disabled={loading}
+                    title="Reject (R)"
+                  >
+                    ✗
+                  </button>
+                  <button
+                    type="button"
+                    className="overlay-btn delete"
+                    onClick={handleDelete}
+                    disabled={loading}
+                    title="Delete (D)"
+                  >
+                    🗑
+                  </button>
+                </div>
+              </div>
+              <div className="overlay-bottom-right">
+                <span className="overlay-dimensions">{image.width} × {image.height}</span>
+              </div>
+            </div>
           </div>
 
-          <div className="image-meta">
-            <div className="meta-item">
-              <span className="meta-label">File:</span>
-              <span className="meta-value filename">{getFilename(image.originalFile)}</span>
+          <div className="compact-controls">
+            <div className="group-section">
+              <span className="control-label">Color:</span>
+              <div className="group-buttons">
+                {GROUP_COLORS.map((group) => (
+                  <button
+                    key={group.number}
+                    className={`group-btn ${groupNumber === group.number ? 'selected' : ''}`}
+                    style={{
+                      '--group-color': group.color,
+                      '--group-text-color': group.textColor,
+                    } as React.CSSProperties}
+                    onClick={() => handleGroupSelect(group.number)}
+                    disabled={loading}
+                    title={`${group.name} (Press ${group.number})`}
+                  >
+                    {group.number}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="meta-item">
-              <span className="meta-label">Size:</span>
-              <span className="meta-value">{image.width} × {image.height}px</span>
-            </div>
-            <div className="meta-item">
-              <span className="meta-label">File Size:</span>
-              <span className="meta-value">{formatFileSize(image.fileSize)}</span>
-            </div>
-          </div>
-
-          <div className="group-section">
-            <div className="group-label">Color Label (0-5):</div>
-            <div className="group-buttons">
-              {GROUP_COLORS.map((group) => (
-                <button
-                  key={group.number}
-                  className={`group-btn ${groupNumber === group.number ? 'selected' : ''}`}
-                  style={{
-                    '--group-color': group.color,
-                    '--group-text-color': group.textColor,
-                  } as React.CSSProperties}
-                  onClick={() => handleGroupSelect(group.number)}
-                  disabled={loading}
-                  title={`${group.name} (Press ${group.number})`}
-                >
-                  {group.number}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="rating-section">
-            <div className="rating-label">Star Rating:</div>
-            <div className="rating-stars">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  className={`star-btn ${rating >= star ? 'filled' : 'empty'}`}
-                  onClick={() => handleRatingSelect(star === rating ? 0 : star)}
-                  disabled={loading}
-                  title={`${star} star${star > 1 ? 's' : ''} (click again to clear)`}
-                >
-                  {rating >= star ? '★' : '☆'}
-                </button>
-              ))}
-              {rating > 0 && (
-                <span className="rating-value">{rating} star{rating > 1 ? 's' : ''}</span>
-              )}
+            <div className="rating-section">
+              <span className="control-label">Rating:</span>
+              <div className="rating-stars">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    className={`star-btn ${rating >= star ? 'filled' : 'empty'}`}
+                    onClick={() => handleRatingSelect(star === rating ? 0 : star)}
+                    disabled={loading}
+                    title={`${star} star${star > 1 ? 's' : ''}`}
+                  >
+                    {rating >= star ? '★' : '☆'}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -388,40 +421,13 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             )}
           </div>
 
-          <div className="action-section">
-            <button
-              onClick={handleApprove}
-              disabled={loading}
-              className="btn-approve"
-              title="Approve (Enter)"
-            >
-              Approve
-            </button>
-            <button
-              onClick={handleReject}
-              disabled={loading}
-              className="btn-reject"
-              title="Reject (R)"
-            >
-              Reject
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={loading}
-              className="btn-delete"
-              title="Delete (D)"
-            >
-              Delete
-            </button>
-          </div>
-
           <div className="keyboard-hints">
-            <span>← → Navigate</span>
-            <span>0-5: Color</span>
-            <span>Enter: Approve</span>
-            <span>R: Reject</span>
-            <span>D: Delete</span>
-            <span>Esc: Close</span>
+            <span>← → Nav</span>
+            <span>0-5 Color</span>
+            <span>Enter Approve</span>
+            <span>R Reject</span>
+            <span>D Delete</span>
+            <span>Esc Close</span>
           </div>
         </div>
       </div>
