@@ -43,6 +43,14 @@ export const api = {
     );
   },
 
+  async undeleteImage(imageId: string): Promise<void> {
+    await axios.post(
+      `${API_BASE_URL}/api/images/${imageId}/undelete`,
+      {},
+      { headers: authService.getAuthHeader() }
+    );
+  },
+
   async getDownloadUrl(imageId: string): Promise<string> {
     const response = await axios.get<{ url: string }>(
       `${API_BASE_URL}/api/images/${imageId}/download`,

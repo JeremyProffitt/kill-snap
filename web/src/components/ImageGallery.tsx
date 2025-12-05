@@ -22,6 +22,18 @@ const GROUP_COLORS = [
 
 type StateFilter = 'unreviewed' | 'approved' | 'rejected' | 'deleted' | 'all';
 
+const formatFileSize = (bytes: number): string => {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+  }
+  return `${(bytes / 1024).toFixed(1)}K`;
+};
+
+const getFilename = (path: string): string => {
+  const parts = path.split('/');
+  return parts[parts.length - 1];
+};
+
 // Helper to render star rating
 const renderStars = (rating: number, maxStars: number = 5) => {
   return Array.from({ length: maxStars }, (_, i) => (
@@ -137,7 +149,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const handleQuickAction = async (
     e: React.MouseEvent,
     image: Image,
-    action: 'approve' | 'reject' | 'delete',
+    action: 'approve' | 'reject' | 'delete' | 'undelete',
     groupNumber?: number
   ) => {
     e.stopPropagation();
@@ -148,6 +160,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     try {
       if (action === 'delete') {
         await api.deleteImage(image.imageGUID);
+      } else if (action === 'undelete') {
+        await api.undeleteImage(image.imageGUID);
       } else if (action === 'approve' && groupNumber !== undefined) {
         const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
         await api.updateImage(image.imageGUID, {
@@ -283,98 +297,112 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         </div>
       ) : (
         <div className="gallery-grid">
-          {images.map((image, index) => (
-            <div
-              key={image.imageGUID}
-              className={`gallery-item ${processingId === image.imageGUID ? 'processing' : ''}`}
-              onClick={() => handleImageClick(index)}
-            >
+          {images.map((image, index) => {
+            const isDeleted = image.status === 'deleted';
+            return (
               <div
-                className="thumbnail-container"
-                style={{
-                  aspectRatio: image.width && image.height
-                    ? `${image.width} / ${image.height}`
-                    : '1 / 1'
-                }}
+                key={image.imageGUID}
+                className={`gallery-item ${processingId === image.imageGUID ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
+                onClick={() => handleImageClick(index)}
               >
-                <img
-                  src={api.getImageUrl(image.bucket, image.thumbnail400)}
-                  alt={image.originalFile}
-                  className="thumbnail"
-                />
-                {(image.rating ?? 0) > 0 && (
-                  <div className="thumbnail-rating">
-                    {renderStars(image.rating ?? 0)}
-                  </div>
-                )}
-                {(image.moveStatus === 'pending' || image.moveStatus === 'moving') && (
-                  <div className="move-status-indicator">
-                    <span className="spinner"></span>
-                    <span className="status-text">
-                      {image.moveStatus === 'pending' ? 'Queued' : 'Moving...'}
+                <div
+                  className="thumbnail-container"
+                  style={{
+                    aspectRatio: image.width && image.height
+                      ? `${image.width} / ${image.height}`
+                      : '1 / 1'
+                  }}
+                >
+                  <img
+                    src={api.getImageUrl(image.bucket, image.thumbnail400)}
+                    alt={image.originalFile}
+                    className="thumbnail"
+                  />
+                  {(image.moveStatus === 'pending' || image.moveStatus === 'moving') && (
+                    <div className="move-status-indicator">
+                      <span className="spinner"></span>
+                      <span className="status-text">
+                        {image.moveStatus === 'pending' ? 'Queued' : 'Moving...'}
+                      </span>
+                    </div>
+                  )}
+                  {image.moveStatus === 'failed' && (
+                    <div className="move-status-indicator error">
+                      <span className="status-text">Move Failed</span>
+                    </div>
+                  )}
+                </div>
+                <div className="image-info">
+                  {/* Row 1: Filename left, dimensions + size right */}
+                  <div className="info-row-1">
+                    <span className="thumb-filename">{getFilename(image.originalFile)}</span>
+                    <span className="thumb-size-info">
+                      {image.width}×{image.height} {formatFileSize(image.fileSize)}
                     </span>
                   </div>
-                )}
-                {image.moveStatus === 'failed' && (
-                  <div className="move-status-indicator error">
-                    <span className="status-text">Move Failed</span>
+                  {/* Row 2: Colors left, actions center, rating right */}
+                  <div className="info-row-2">
+                    {isDeleted ? (
+                      <button
+                        type="button"
+                        className="undelete-btn"
+                        onClick={(e) => handleQuickAction(e, image, 'undelete')}
+                        title="Undelete"
+                      >
+                        ↩ Undelete
+                      </button>
+                    ) : (
+                      <>
+                        <div className="thumb-colors">
+                          {GROUP_COLORS.slice(1).map((group) => (
+                            <button
+                              key={group.number}
+                              type="button"
+                              className={`color-btn ${image.groupNumber === group.number ? 'selected' : ''}`}
+                              style={{ backgroundColor: group.color }}
+                              onClick={(e) => handleQuickAction(e, image, 'approve', group.number)}
+                              title={`${group.name} (${group.number})`}
+                            >
+                              {group.number}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="thumb-actions">
+                          <button
+                            type="button"
+                            className="action-btn-mini approve"
+                            onClick={(e) => handleQuickAction(e, image, 'approve', image.groupNumber || 1)}
+                            title="Approve"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn-mini reject"
+                            onClick={(e) => handleQuickAction(e, image, 'reject')}
+                            title="Reject"
+                          >
+                            ✗
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn-mini delete"
+                            onClick={(e) => handleQuickAction(e, image, 'delete')}
+                            title="Delete"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                        <div className="thumb-rating">
+                          {renderStars(image.rating ?? 0)}
+                        </div>
+                      </>
+                    )}
                   </div>
-                )}
-                <div className="quick-actions-overlay">
-                  <button
-                    type="button"
-                    className="quick-btn approve"
-                    onClick={(e) => handleQuickAction(e, image, 'approve', 1)}
-                    title="Quick Approve (Group 1)"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    className="quick-btn reject"
-                    onClick={(e) => handleQuickAction(e, image, 'reject')}
-                    title="Reject"
-                  >
-                    ✗
-                  </button>
-                  <button
-                    type="button"
-                    className="quick-btn delete"
-                    onClick={(e) => handleQuickAction(e, image, 'delete')}
-                    title="Delete"
-                  >
-                    🗑
-                  </button>
                 </div>
               </div>
-              <div className="image-info">
-                <div className="image-meta-row">
-                  <div className="image-dimensions">
-                    {image.width}×{image.height}
-                  </div>
-                  {image.rating ? (
-                    <div className="image-rating-display">
-                      {renderStars(image.rating)}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="group-buttons-mini">
-                  {GROUP_COLORS.slice(1).map((group) => (
-                    <button
-                      key={group.number}
-                      type="button"
-                      className="group-btn-mini"
-                      style={{ backgroundColor: group.color }}
-                      onClick={(e) => handleQuickAction(e, image, 'approve', group.number)}
-                      title={`Approve as Group ${group.number} (${group.name})`}
-                    >
-                      {group.number}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

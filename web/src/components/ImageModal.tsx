@@ -54,6 +54,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const [regeneratingAI, setRegeneratingAI] = useState(false);
   const [description, setDescription] = useState<string>('');
 
+  const isDeleted = image.status === 'deleted';
+
   // Reset group, rating, keywords, and description when image changes
   useEffect(() => {
     setGroupNumber(image.groupNumber || 0);
@@ -109,6 +111,19 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } catch (err) {
       console.error('Failed to delete image:', err);
       alert('Failed to delete image');
+    } finally {
+      setLoading(false);
+    }
+  }, [image.imageGUID, onUpdate]);
+
+  const handleUndelete = useCallback(async () => {
+    setLoading(true);
+    try {
+      await api.undeleteImage(image.imageGUID);
+      onUpdate();
+    } catch (err) {
+      console.error('Failed to undelete image:', err);
+      alert('Failed to undelete image');
     } finally {
       setLoading(false);
     }
@@ -198,7 +213,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       }
 
       // Number keys 0-5 for group selection (Lightroom colors)
-      if (key >= '0' && key <= '5') {
+      if (key >= '0' && key <= '5' && !isDeleted) {
         e.preventDefault();
         handleGroupSelect(parseInt(key));
         return;
@@ -211,31 +226,42 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         return;
       }
 
-      // Enter to approve
+      // Enter to approve (or undelete if deleted)
       if (key === 'Enter') {
         e.preventDefault();
-        handleApprove();
+        if (isDeleted) {
+          handleUndelete();
+        } else {
+          handleApprove();
+        }
         return;
       }
 
       // 'r' to reject
-      if (key === 'r' || key === 'R') {
+      if ((key === 'r' || key === 'R') && !isDeleted) {
         e.preventDefault();
         handleReject();
         return;
       }
 
       // 'd' or Delete to delete
-      if (key === 'd' || key === 'D' || key === 'Delete') {
+      if ((key === 'd' || key === 'D' || key === 'Delete') && !isDeleted) {
         e.preventDefault();
         handleDelete();
+        return;
+      }
+
+      // 'u' to undelete
+      if ((key === 'u' || key === 'U') && isDeleted) {
+        e.preventDefault();
+        handleUndelete();
         return;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handlePrev, handleNext, onClose, groupNumber]);
+  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handleUndelete, handlePrev, handleNext, onClose, groupNumber, isDeleted]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -245,16 +271,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
-      {/* Left Navigation Arrow */}
-      <button
-        className={`nav-arrow nav-prev ${!hasPrev ? 'disabled' : ''}`}
-        onClick={handlePrev}
-        disabled={!hasPrev || loading}
-        title="Previous (←)"
-      >
-        ‹
-      </button>
-
       <div className="modal-content">
         <button className="close-button" onClick={onClose} disabled={loading}>
           ×
@@ -268,34 +284,56 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             </div>
           </div>
 
-          <div className="image-preview">
-            <img
-              src={api.getImageUrl(image.bucket, image.thumbnail400)}
-              alt={image.originalFile}
-            />
-            {/* Image overlay with filename, dimensions, stars, and action icons */}
-            <div className="image-overlay">
-              <div className="overlay-bottom-left">
-                <span className="overlay-filename">{getFilename(image.originalFile)}</span>
-                <span className="overlay-filesize">{formatFileSize(image.fileSize)}</span>
-              </div>
-              <div className="overlay-center">
-                <div className="overlay-stars">
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      className={`overlay-star-btn ${rating >= star ? 'filled' : 'empty'}`}
-                      onClick={() => handleRatingSelect(star === rating ? 0 : star)}
-                      disabled={loading}
-                    >
-                      {rating >= star ? '★' : '☆'}
-                    </button>
-                  ))}
-                </div>
-                <div className="overlay-actions">
+          <div className="image-preview-container">
+            {/* Left Navigation Arrow */}
+            <button
+              className={`image-nav-arrow image-nav-prev ${!hasPrev ? 'disabled' : ''}`}
+              onClick={handlePrev}
+              disabled={!hasPrev || loading}
+              title="Previous (←)"
+            >
+              ‹
+            </button>
+
+            <div className="image-preview">
+              <img
+                src={api.getImageUrl(image.bucket, image.thumbnail400)}
+                alt={image.originalFile}
+              />
+            </div>
+
+            {/* Right Navigation Arrow */}
+            <button
+              className={`image-nav-arrow image-nav-next ${!hasNext ? 'disabled' : ''}`}
+              onClick={handleNext}
+              disabled={!hasNext || loading}
+              title="Next (→)"
+            >
+              ›
+            </button>
+          </div>
+
+          {/* Image info bar: filename left, actions center, dimensions right */}
+          <div className="image-info-bar">
+            <div className="info-left">
+              <span className="info-filename">{getFilename(image.originalFile)}</span>
+            </div>
+            <div className="info-center">
+              {isDeleted ? (
+                <button
+                  type="button"
+                  className="action-btn undelete"
+                  onClick={handleUndelete}
+                  disabled={loading}
+                  title="Undelete (U)"
+                >
+                  ↩ Undelete
+                </button>
+              ) : (
+                <>
                   <button
                     type="button"
-                    className="overlay-btn approve"
+                    className="action-btn approve"
                     onClick={handleApprove}
                     disabled={loading}
                     title="Approve (Enter)"
@@ -304,7 +342,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    className="overlay-btn reject"
+                    className="action-btn reject"
                     onClick={handleReject}
                     disabled={loading}
                     title="Reject (R)"
@@ -313,24 +351,25 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    className="overlay-btn delete"
+                    className="action-btn delete"
                     onClick={handleDelete}
                     disabled={loading}
                     title="Delete (D)"
                   >
                     🗑
                   </button>
-                </div>
-              </div>
-              <div className="overlay-bottom-right">
-                <span className="overlay-dimensions">{image.width} × {image.height}</span>
-              </div>
+                </>
+              )}
+            </div>
+            <div className="info-right">
+              <span className="info-dimensions">{image.width}×{image.height}</span>
+              <span className="info-filesize">{formatFileSize(image.fileSize)}</span>
             </div>
           </div>
 
-          <div className="compact-controls">
-            <div className="group-section">
-              <span className="control-label">Color:</span>
+          {/* Controls row: colors left, rating right */}
+          {!isDeleted && (
+            <div className="controls-row">
               <div className="group-buttons">
                 {GROUP_COLORS.map((group) => (
                   <button
@@ -348,9 +387,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   </button>
                 ))}
               </div>
-            </div>
-            <div className="rating-section">
-              <span className="control-label">Rating:</span>
               <div className="rating-stars">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
@@ -365,10 +401,20 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                 ))}
               </div>
             </div>
-          </div>
+          )}
 
           <div className="keywords-section">
-            <div className="keywords-label">Keywords:</div>
+            <div className="keywords-header">
+              <span className="keywords-label">Keywords:</span>
+              <button
+                className="regenerate-ai-btn"
+                onClick={handleRegenerateAI}
+                disabled={loading || regeneratingAI}
+                title="Regenerate AI keywords and description"
+              >
+                {regeneratingAI ? 'Analyzing...' : 'Regenerate AI'}
+              </button>
+            </div>
             <div className="keywords-container">
               {keywords.map((keyword) => (
                 <span key={keyword} className="keyword-tag">
@@ -406,17 +452,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           </div>
 
           <div className="description-section">
-            <div className="description-header">
-              <div className="description-label">AI Description:</div>
-              <button
-                className="regenerate-ai-btn"
-                onClick={handleRegenerateAI}
-                disabled={loading || regeneratingAI}
-                title="Regenerate AI keywords and description"
-              >
-                {regeneratingAI ? 'Analyzing...' : 'Regenerate AI'}
-              </button>
-            </div>
+            <div className="description-label">AI Description:</div>
             {description ? (
               <p className="description-text">{description}</p>
             ) : (
@@ -427,23 +463,14 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           <div className="keyboard-hints">
             <span>← → Nav</span>
             <span>0-5 Color</span>
-            <span>Enter Approve</span>
-            <span>R Reject</span>
-            <span>D Delete</span>
+            <span>Enter {isDeleted ? 'Undelete' : 'Approve'}</span>
+            {!isDeleted && <span>R Reject</span>}
+            {!isDeleted && <span>D Delete</span>}
+            {isDeleted && <span>U Undelete</span>}
             <span>Esc Close</span>
           </div>
         </div>
       </div>
-
-      {/* Right Navigation Arrow */}
-      <button
-        className={`nav-arrow nav-next ${!hasNext ? 'disabled' : ''}`}
-        onClick={handleNext}
-        disabled={!hasNext || loading}
-        title="Next (→)"
-      >
-        ›
-      </button>
     </div>
   );
 };
