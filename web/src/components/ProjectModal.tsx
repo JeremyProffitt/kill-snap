@@ -69,7 +69,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   }, [onProjectCreated]);
 
-  // Periodically check for generating zips that might have timed out
+  // Periodically check for generating zips - refresh every 10 seconds to catch completion
   useEffect(() => {
     const projectsWithGeneratingZips = existingProjects.filter(
       p => p.zipFiles?.some(z => z.status === 'generating')
@@ -77,16 +77,24 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
     if (projectsWithGeneratingZips.length === 0) return;
 
-    // Check immediately for any generating zips
+    // Check for timeout/errors immediately
     projectsWithGeneratingZips.forEach(checkZipStatus);
 
-    // Then check every 30 seconds
-    const interval = setInterval(() => {
+    // Refresh projects every 10 seconds to check for completion
+    const refreshInterval = setInterval(() => {
+      onProjectCreated(); // This refreshes the projects list
+    }, 10000);
+
+    // Check for errors every 30 seconds
+    const errorCheckInterval = setInterval(() => {
       projectsWithGeneratingZips.forEach(checkZipStatus);
     }, 30000);
 
-    return () => clearInterval(interval);
-  }, [existingProjects, checkZipStatus]);
+    return () => {
+      clearInterval(refreshInterval);
+      clearInterval(errorCheckInterval);
+    };
+  }, [existingProjects, checkZipStatus, onProjectCreated]);
 
   const handleCreateProject = async () => {
     if (!projectName.trim()) {

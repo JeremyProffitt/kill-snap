@@ -312,7 +312,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
               <div className="sidebar-section">
                 <label className="sidebar-label">Group</label>
-                <div className="group-boxes">
+                <div className="group-boxes-row">
                   <button
                     className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}
                     onClick={() => setGroupFilter('all')}
@@ -320,7 +320,16 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   >
                     All
                   </button>
-                  {GROUP_COLORS.map((group) => (
+                  <button
+                    className={`group-box group-ungrouped ${groupFilter === 0 ? 'active' : ''}`}
+                    onClick={() => setGroupFilter(0)}
+                    title="Ungrouped"
+                  >
+                    Ungrouped
+                  </button>
+                </div>
+                <div className="group-boxes-row">
+                  {GROUP_COLORS.slice(1).map((group) => (
                     <button
                       key={group.number}
                       className={`group-box ${groupFilter === group.number ? 'active' : ''}`}
