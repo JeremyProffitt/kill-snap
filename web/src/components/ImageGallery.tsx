@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api, ImageFilters } from '../services/api';
 import { authService } from '../services/auth';
 import { Image, Project } from '../types';
@@ -42,7 +42,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
-  const loadImagesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stateFilter, setStateFilter] = useState<StateFilter>('unreviewed');
   const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -169,17 +168,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     setNotification(null);
   }, []);
 
-  // Debounced loadImages for batch operations
-  const debouncedLoadImages = useCallback(() => {
-    if (loadImagesTimeoutRef.current) {
-      clearTimeout(loadImagesTimeoutRef.current);
-    }
-    loadImagesTimeoutRef.current = setTimeout(() => {
-      loadImages();
-      loadImagesTimeoutRef.current = null;
-    }, 500);
-  }, [loadImages]);
-
   const handleQuickAction = async (
     e: React.MouseEvent,
     image: Image,
@@ -197,30 +185,51 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     // Add this image to processing set
     setProcessingIds(prev => new Set(prev).add(imageId));
 
-    // Optimistic local update for immediate feedback
-    if (action === 'approve' && groupNumber !== undefined) {
-      const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
-      handlePropertyChange(imageId, {
-        groupNumber,
-        colorCode: colorName
-      });
-    } else if (action === 'delete') {
-      // Optimistic update: mark as deleted locally
-      handlePropertyChange(imageId, { status: 'deleted' });
-    } else if (action === 'undelete') {
-      // Optimistic update: mark as inbox (restored) locally
-      handlePropertyChange(imageId, { status: 'inbox' });
+    // Determine if this action should remove the item from current view
+    const shouldRemoveFromView = (): boolean => {
+      if (selectedProject) return false; // Don't remove from project views
+      if (stateFilter === 'all') return false; // Don't remove from 'all' view
+
+      switch (action) {
+        case 'approve':
+          return stateFilter === 'unreviewed' || stateFilter === 'rejected';
+        case 'reject':
+          return stateFilter === 'unreviewed' || stateFilter === 'approved';
+        case 'delete':
+          return stateFilter !== 'deleted';
+        case 'undelete':
+          return stateFilter === 'deleted';
+        default:
+          return false;
+      }
+    };
+
+    // Store original image and index for potential rollback
+    const originalImage = { ...image };
+    const originalIndex = images.findIndex(img => img.imageGUID === imageId);
+    const willRemove = shouldRemoveFromView();
+
+    // Optimistic update
+    if (willRemove) {
+      // Remove from list immediately
+      setImages(prev => prev.filter(img => img.imageGUID !== imageId));
+    } else {
+      // Just update properties
+      if (action === 'approve' && groupNumber !== undefined) {
+        const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
+        handlePropertyChange(imageId, { groupNumber, colorCode: colorName });
+      } else if (action === 'delete') {
+        handlePropertyChange(imageId, { status: 'deleted' });
+      } else if (action === 'undelete') {
+        handlePropertyChange(imageId, { status: 'inbox' });
+      }
     }
 
     try {
       if (action === 'delete') {
         await api.deleteImage(imageId);
-        // Use debounced reload for delete to allow batching
-        debouncedLoadImages();
       } else if (action === 'undelete') {
         await api.undeleteImage(imageId);
-        // Use debounced reload for undelete to allow batching
-        debouncedLoadImages();
       } else if (action === 'approve' && groupNumber !== undefined) {
         const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
         await api.updateImage(imageId, {
@@ -229,21 +238,31 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           promoted: false,
           reviewed: 'true',
         });
-        await loadImages();
       } else if (action === 'reject') {
         await api.updateImage(imageId, {
           groupNumber: 0,
           colorCode: 'white',
           reviewed: 'true',
         });
-        await loadImages();
       }
+      // Success - no refresh needed, optimistic update already applied
     } catch (err: any) {
       console.error(`Failed to ${action} image:`, err);
       const errorMessage = err.response?.data?.error || `Failed to ${action} image`;
       showNotification(errorMessage, 'error');
-      // Reload on error to restore correct state
-      await loadImages();
+
+      // Rollback on error
+      if (willRemove && originalIndex !== -1) {
+        // Re-insert the image at its original position
+        setImages(prev => {
+          const newImages = [...prev];
+          newImages.splice(originalIndex, 0, originalImage);
+          return newImages;
+        });
+      } else {
+        // Restore original properties
+        handlePropertyChange(imageId, originalImage);
+      }
     } finally {
       // Remove this image from processing set
       setProcessingIds(prev => {
