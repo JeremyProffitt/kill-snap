@@ -292,8 +292,8 @@
 
 .zip-file-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.5rem;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
@@ -303,22 +303,21 @@
 .zip-file-info {
   font-size: 0.8rem;
   color: #b8c2d0;
-  flex: 1;
-  margin-right: 0.5rem;
   word-break: break-all;
 }
 
 .download-zip-btn {
-  padding: 0.4rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   border: none;
   border-radius: 4px;
   background: #27ae60;
   color: white;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  white-space: nowrap;
+  width: 100%;
+  text-align: center;
 }
 
 .download-zip-btn:hover:not(:disabled) {
@@ -398,6 +397,55 @@
 
 .zip-error-message:last-child {
   margin-bottom: 0;
+}
+
+/* Image filter buttons for Add to Project */
+.image-filter-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filter-buttons-row {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.filter-btn {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 12px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.filter-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.filter-btn.active {
+  border-color: white;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.filter-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-btn.filter-all {
+  background: #444;
+  flex: 1;
 }
 
 @media (max-width: 500px) {

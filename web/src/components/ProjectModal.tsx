@@ -393,18 +393,33 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             </select>
 
             <label>Images to Add:</label>
-            <select
-              value={imageFilter}
-              onChange={(e) => setImageFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-              disabled={loading}
-            >
-              <option value="all">All Approved Images</option>
-              {GROUP_COLORS.map((group) => (
-                <option key={group.number} value={group.number}>
-                  Group {group.number}: {group.name}
-                </option>
-              ))}
-            </select>
+            <div className="image-filter-buttons">
+              <div className="filter-buttons-row">
+                <button
+                  type="button"
+                  className={`filter-btn filter-all ${imageFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setImageFilter('all')}
+                  disabled={loading}
+                >
+                  All
+                </button>
+              </div>
+              <div className="filter-buttons-row">
+                {GROUP_COLORS.map((group) => (
+                  <button
+                    key={group.number}
+                    type="button"
+                    className={`filter-btn ${imageFilter === group.number ? 'active' : ''}`}
+                    style={{ backgroundColor: group.color }}
+                    onClick={() => setImageFilter(group.number)}
+                    disabled={loading}
+                    title={group.name}
+                  >
+                    {group.number}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <button
               className="project-btn primary"

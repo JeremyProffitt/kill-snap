@@ -980,7 +980,12 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		parts := strings.Split(path, "/")
 		if len(parts) >= 7 {
 			projectID := parts[3]
-			zipKey := strings.Join(parts[5:len(parts)-1], "/")
+			zipKeyEncoded := strings.Join(parts[5:len(parts)-1], "/")
+			// URL-decode the zipKey since it may contain encoded slashes
+			zipKey, err := url.QueryUnescape(zipKeyEncoded)
+			if err != nil {
+				zipKey = zipKeyEncoded // Fall back to encoded version if decode fails
+			}
 			return handleGetZipDownload(projectID, zipKey, headers)
 		}
 		return errorResponse(400, "Invalid zip download path", headers)
