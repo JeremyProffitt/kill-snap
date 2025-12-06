@@ -110,7 +110,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [groupNumber, rating, keywords, image.imageGUID, onUpdate]);
+  }, [groupNumber, rating, keywords, image.imageGUID, onUpdate, onNotify]);
 
   const handleReject = useCallback(async () => {
     setLoading(true);
@@ -127,7 +127,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [image.imageGUID, onUpdate]);
+  }, [image.imageGUID, onUpdate, onNotify]);
 
   const handleDelete = useCallback(async () => {
     setLoading(true);
@@ -140,7 +140,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [image.imageGUID, onUpdate]);
+  }, [image.imageGUID, onUpdate, onNotify]);
 
   const handleUndelete = useCallback(async () => {
     setLoading(true);
@@ -153,7 +153,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [image.imageGUID, onUpdate]);
+  }, [image.imageGUID, onUpdate, onNotify]);
 
   const handleRegenerateAI = useCallback(async () => {
     setRegeneratingAI(true);
@@ -172,7 +172,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setRegeneratingAI(false);
     }
-  }, [image.imageGUID, onPropertyChange]);
+  }, [image.imageGUID, onPropertyChange, onNotify]);
 
   const handleGroupSelect = useCallback((num: number) => {
     if (!loading) {
