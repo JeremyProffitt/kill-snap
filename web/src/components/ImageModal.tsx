@@ -104,9 +104,10 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         reviewed: 'true',
       });
       onUpdate();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to approve image:', err);
-      onNotify('Failed to approve image', 'error');
+      const errorMessage = err.response?.data?.error || 'Failed to approve image';
+      onNotify(errorMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -121,9 +122,10 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         reviewed: 'true',
       });
       onUpdate();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to reject image:', err);
-      onNotify('Failed to reject image', 'error');
+      const errorMessage = err.response?.data?.error || 'Failed to reject image';
+      onNotify(errorMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -134,9 +136,10 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     try {
       await api.deleteImage(image.imageGUID);
       onUpdate();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete image:', err);
-      onNotify('Failed to delete image', 'error');
+      const errorMessage = err.response?.data?.error || 'Failed to delete image';
+      onNotify(errorMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -147,9 +150,10 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     try {
       await api.undeleteImage(image.imageGUID);
       onUpdate();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to undelete image:', err);
-      onNotify('Failed to undelete image', 'error');
+      const errorMessage = err.response?.data?.error || 'Failed to undelete image';
+      onNotify(errorMessage, 'error');
     } finally {
       setLoading(false);
     }

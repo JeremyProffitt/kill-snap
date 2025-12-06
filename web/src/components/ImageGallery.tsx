@@ -238,9 +238,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         });
         await loadImages();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Failed to ${action} image:`, err);
-      showNotification(`Failed to ${action} image`, 'error');
+      const errorMessage = err.response?.data?.error || `Failed to ${action} image`;
+      showNotification(errorMessage, 'error');
       // Reload on error to restore correct state
       await loadImages();
     } finally {

@@ -56,7 +56,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
   useEffect(() => {
     if (existingProjects.length > 0) {
-      setSelectedProject(existingProjects[0].projectId);
+      // Only set selected project if none is selected, or if current selection is no longer valid
+      setSelectedProject(prev => {
+        if (!prev || !existingProjects.find(p => p.projectId === prev)) {
+          return existingProjects[0].projectId;
+        }
+        return prev;
+      });
     }
   }, [existingProjects]);
 
