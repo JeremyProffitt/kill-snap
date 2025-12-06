@@ -152,14 +152,15 @@ func handleRequest(ctx context.Context, request ZipRequest) error {
 
 	for i, batch := range batches {
 		var zipKey string
+		// Store zips in root of project folder (projects/{s3Prefix}/)
 		if len(batches) == 1 {
-			zipKey = fmt.Sprintf("project-zips/%s/%s_%s.zip", s3Prefix, sanitizedName, dateStr)
+			zipKey = fmt.Sprintf("projects/%s/%s_%s.zip", s3Prefix, sanitizedName, dateStr)
 		} else {
-			zipKey = fmt.Sprintf("project-zips/%s/%s_%s_part%d.zip", s3Prefix, sanitizedName, dateStr, i+1)
+			zipKey = fmt.Sprintf("projects/%s/%s_%s_part%d.zip", s3Prefix, sanitizedName, dateStr, i+1)
 		}
 
-		// Create zip file
-		zipInfo, err := createAndUploadZip(ctx, batch, zipKey)
+		// Create zip file (include lrcat catalog if available)
+		zipInfo, err := createAndUploadZip(ctx, batch, zipKey, project.CatalogPath)
 		if err != nil {
 			fmt.Printf("Error creating zip %s: %v\n", zipKey, err)
 			// Record failed zip
@@ -288,9 +289,10 @@ func sanitizeZipName(name string) string {
 	return result
 }
 
-func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string) (*ZipFile, error) {
+func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string, catalogPath string) (*ZipFile, error) {
 	fmt.Printf("=== Creating zip: %s ===\n", zipKey)
 	fmt.Printf("Images to include: %d\n", len(images))
+	fmt.Printf("Catalog path: %s\n", catalogPath)
 
 	// Create a temporary file for the zip
 	tmpFile, err := os.CreateTemp("", "project-*.zip")
@@ -310,6 +312,60 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 	successCount := 0
 	failCount := 0
 
+	// Helper function to add a file to zip using Store method (no compression)
+	addFileToZip := func(s3Key string, zipFileName string) error {
+		fmt.Printf("  Downloading from S3: bucket=%s, key=%s\n", bucketName, s3Key)
+		getResult, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(s3Key),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to download from S3: %v", err)
+		}
+		defer getResult.Body.Close()
+
+		// Get file size for the header
+		var fileSize int64
+		if getResult.ContentLength != nil {
+			fileSize = *getResult.ContentLength
+		}
+
+		// Create zip header with Store method (no compression)
+		header := &zip.FileHeader{
+			Name:   zipFileName,
+			Method: zip.Store, // Store mode - no compression
+		}
+		header.SetModTime(time.Now())
+		// Set uncompressed size for store method
+		header.UncompressedSize64 = uint64(fileSize)
+
+		fmt.Printf("  Adding to zip as: %s (Store mode, size: %d bytes)\n", zipFileName, fileSize)
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return fmt.Errorf("failed to create zip entry: %v", err)
+		}
+
+		bytesWritten, err := io.Copy(writer, getResult.Body)
+		if err != nil {
+			return fmt.Errorf("failed to write to zip: %v", err)
+		}
+
+		fmt.Printf("  SUCCESS: Written %d bytes\n", bytesWritten)
+		return nil
+	}
+
+	// Add lrcat catalog file first if available
+	if catalogPath != "" {
+		fmt.Printf("Adding catalog file to zip: %s\n", catalogPath)
+		catalogFileName := filepath.Base(catalogPath)
+		if err := addFileToZip(catalogPath, catalogFileName); err != nil {
+			fmt.Printf("  WARNING: Failed to add catalog to zip: %v\n", err)
+		} else {
+			fileNames[catalogFileName] = 1
+			successCount++
+		}
+	}
+
 	for i, img := range images {
 		fmt.Printf("[%d/%d] Processing: %s\n", i+1, len(images), img.OriginalFile)
 
@@ -326,37 +382,11 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 			fileNames[baseName] = 1
 		}
 
-		// Download file from S3
-		fmt.Printf("  Downloading from S3: bucket=%s, key=%s\n", bucketName, img.OriginalFile)
-		getResult, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(img.OriginalFile),
-		})
-		if err != nil {
-			fmt.Printf("  ERROR: Failed to download from S3: %v\n", err)
+		if err := addFileToZip(img.OriginalFile, fileName); err != nil {
+			fmt.Printf("  ERROR: %v\n", err)
 			failCount++
 			continue
 		}
-
-		// Add file to zip
-		fmt.Printf("  Adding to zip as: %s\n", fileName)
-		writer, err := zipWriter.Create(fileName)
-		if err != nil {
-			getResult.Body.Close()
-			fmt.Printf("  ERROR: Failed to create zip entry: %v\n", err)
-			failCount++
-			continue
-		}
-
-		bytesWritten, err := io.Copy(writer, getResult.Body)
-		getResult.Body.Close()
-		if err != nil {
-			fmt.Printf("  ERROR: Failed to write to zip: %v\n", err)
-			failCount++
-			continue
-		}
-
-		fmt.Printf("  SUCCESS: Written %d bytes\n", bytesWritten)
 		successCount++
 	}
 
