@@ -390,8 +390,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
               )}
             </div>
             <div className="info-right">
-              <span className="info-dimensions">{image.width}×{image.height}</span>
-              <span className="info-filesize">{formatFileSize(image.fileSize)}</span>
+              <span className="info-dimensions">{image.width}×{image.height} - {formatFileSize(image.fileSize)}</span>
             </div>
           </div>
 

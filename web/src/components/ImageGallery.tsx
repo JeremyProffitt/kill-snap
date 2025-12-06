@@ -53,6 +53,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
+  const [targetProject, setTargetProject] = useState<string>('');
+  const [addingToProject, setAddingToProject] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
 
   const loadProjects = useCallback(async () => {
@@ -205,13 +207,21 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   };
 
-  const getStateLabel = () => {
-    switch (stateFilter) {
-      case 'unreviewed': return 'unreviewed';
-      case 'approved': return 'approved';
-      case 'rejected': return 'rejected';
-      case 'deleted': return 'deleted';
-      case 'all': return 'total';
+  const handleAddToProject = async () => {
+    if (!targetProject || addingToProject) return;
+
+    setAddingToProject(true);
+    try {
+      const filters = groupFilter !== 'all' ? { group: groupFilter } : { all: true };
+      const result = await api.addToProject(targetProject, filters);
+      alert(`Added ${result.movedCount} images to project`);
+      loadProjects();
+      loadImages();
+    } catch (err) {
+      console.error('Failed to add to project:', err);
+      alert('Failed to add images to project');
+    } finally {
+      setAddingToProject(false);
     }
   };
 
@@ -220,10 +230,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   return (
     <div className="gallery-container">
       <header className="gallery-header">
-        <h1>Image Review</h1>
+        <h1>Kill Snap</h1>
         <div className="header-controls">
           <div className="filter-group">
-            <label>View:</label>
+            <label>View Project:</label>
             <select
               value={selectedProject}
               onChange={(e) => handleProjectChange(e.target.value)}
@@ -268,18 +278,39 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   ))}
                 </select>
               </div>
+              <div className="filter-group">
+                <select
+                  value={targetProject}
+                  onChange={(e) => setTargetProject(e.target.value)}
+                  className="filter-select"
+                >
+                  <option value="">Select Project...</option>
+                  {projects.map((project) => (
+                    <option key={project.projectId} value={project.projectId}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAddToProject}
+                  disabled={!targetProject || addingToProject}
+                  className="add-to-project-button"
+                >
+                  {addingToProject ? 'Adding...' : 'Add to Project'}
+                </button>
+              </div>
             </>
           )}
           <button
             onClick={() => setShowProjectModal(true)}
             className="projects-button"
           >
-            Projects
+            Manage Projects
           </button>
         </div>
         <div className="header-actions">
           <span className="image-count">
-            {images.length} {selectedProject ? 'project' : getStateLabel()} images
+            {selectedProject ? `project: ${images.length}` : `unreviewed: ${images.length}`}
           </span>
           <button onClick={handleLogout} className="logout-button">
             Logout
@@ -337,7 +368,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   <div className="info-row-1">
                     <span className="thumb-filename">{getFilename(image.originalFile)}</span>
                     <span className="thumb-size-info">
-                      {image.width}×{image.height} {formatFileSize(image.fileSize)}
+                      {image.width}×{image.height} - {formatFileSize(image.fileSize)}
                     </span>
                   </div>
                   {/* Row 2: Colors left, actions center, rating right */}
