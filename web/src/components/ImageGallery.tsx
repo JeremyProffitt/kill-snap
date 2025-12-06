@@ -4,6 +4,7 @@ import { authService } from '../services/auth';
 import { Image, Project } from '../types';
 import { ImageModal } from './ImageModal';
 import { ProjectModal } from './ProjectModal';
+import { TransferBanner, TransferProgress } from './TransferBanner';
 import './ImageGallery.css';
 
 interface ImageGalleryProps {
@@ -48,6 +49,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [targetProject, setTargetProject] = useState<string>('');
   const [addingToProject, setAddingToProject] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [transferProgress, setTransferProgress] = useState<TransferProgress>({
+    isActive: false,
+    currentFile: '',
+    currentIndex: 0,
+    totalCount: 0,
+    projectName: '',
+    status: 'transferring',
+  });
 
   const loadProjects = useCallback(async () => {
     try {
@@ -245,25 +254,66 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const handleAddToProject = async () => {
     if (!targetProject || addingToProject) return;
 
+    const projectName = projects.find(p => p.projectId === targetProject)?.name || 'project';
+
     setAddingToProject(true);
+    setTransferProgress({
+      isActive: true,
+      currentFile: '',
+      currentIndex: 0,
+      totalCount: 0,
+      projectName,
+      status: 'transferring',
+    });
+
     try {
       const filters = groupFilter !== 'all' ? { group: groupFilter } : { all: true };
-      const result = await api.addToProject(targetProject, filters);
-      alert(`Added ${result.movedCount} images to project`);
+      const result = await api.addToProjectWithProgress(
+        targetProject,
+        filters,
+        (currentFile, currentIndex, totalCount) => {
+          setTransferProgress(prev => ({
+            ...prev,
+            currentFile,
+            currentIndex,
+            totalCount,
+          }));
+        }
+      );
+
+      setTransferProgress(prev => ({
+        ...prev,
+        currentIndex: result.movedCount,
+        totalCount: result.movedCount,
+        status: 'complete',
+      }));
+
       loadProjects();
       loadImages();
     } catch (err) {
       console.error('Failed to add to project:', err);
-      alert('Failed to add images to project');
+      setTransferProgress(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: 'Failed to add images to project',
+      }));
     } finally {
       setAddingToProject(false);
     }
+  };
+
+  const handleDismissTransfer = () => {
+    setTransferProgress(prev => ({
+      ...prev,
+      isActive: false,
+    }));
   };
 
   const selectedImage = selectedImageIndex !== null ? images[selectedImageIndex] : null;
 
   return (
     <div className="gallery-container">
+      <TransferBanner progress={transferProgress} onDismiss={handleDismissTransfer} />
       <aside className="sidebar">
         <div className="sidebar-top">
           <h1 className="sidebar-title">Kill Snap</h1>
@@ -317,7 +367,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                     className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}
                     onClick={() => {
                       setGroupFilter('all');
-                      setStatusFilter('unreviewed');
+                      setStateFilter('unreviewed');
                     }}
                     title="All Groups"
                   >
@@ -327,7 +377,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                     className={`group-box group-ungrouped ${groupFilter === 0 ? 'active' : ''}`}
                     onClick={() => {
                       setGroupFilter(0);
-                      setStatusFilter('unreviewed');
+                      setStateFilter('unreviewed');
                     }}
                     title="Ungrouped"
                   >
@@ -342,7 +392,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                       style={{ backgroundColor: group.color }}
                       onClick={() => {
                         setGroupFilter(group.number);
-                        setStatusFilter('approved');
+                        setStateFilter('approved');
                       }}
                       title={group.name}
                     >

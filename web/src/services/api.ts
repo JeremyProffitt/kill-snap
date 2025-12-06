@@ -3,6 +3,10 @@ import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
 import { Image, UpdateImageRequest, Project, AddToProjectRequest, CatalogDownloadResponse } from '../types';
 
+export interface TransferProgressCallback {
+  (currentFile: string, currentIndex: number, totalCount: number): void;
+}
+
 export interface ImageFilters {
   state?: 'unreviewed' | 'approved' | 'rejected' | 'deleted' | 'all';
   group?: number | 'all';
@@ -91,6 +95,60 @@ export const api = {
       { headers: authService.getAuthHeader() }
     );
     return response.data;
+  },
+
+  async getApprovedImages(filters: AddToProjectRequest): Promise<Image[]> {
+    // Get approved images that match the filter criteria
+    const params = new URLSearchParams();
+    params.append('state', 'approved');
+    if (!filters.all && filters.group !== undefined) {
+      params.append('group', String(filters.group));
+    }
+    const response = await axios.get<Image[]>(
+      `${API_BASE_URL}/api/images?${params.toString()}`,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
+
+  async addToProjectWithProgress(
+    projectId: string,
+    filters: AddToProjectRequest,
+    onProgress: TransferProgressCallback
+  ): Promise<{ movedCount: number; failedCount: number }> {
+    // First, get the list of images to be moved for progress display
+    const images = await this.getApprovedImages(filters);
+    const totalCount = images.length;
+
+    if (totalCount === 0) {
+      return { movedCount: 0, failedCount: 0 };
+    }
+
+    // Start showing progress with file names
+    // Simulate progress during the bulk transfer
+    let progressIndex = 0;
+    const progressInterval = setInterval(() => {
+      if (progressIndex < images.length) {
+        onProgress(images[progressIndex].originalFile, progressIndex + 1, totalCount);
+        progressIndex++;
+      }
+    }, 100); // Show each file for 100ms minimum
+
+    try {
+      // Perform the actual bulk transfer
+      const result = await this.addToProject(projectId, filters);
+
+      // Clear progress interval
+      clearInterval(progressInterval);
+
+      // Show final progress
+      onProgress(images[images.length - 1]?.originalFile || '', totalCount, totalCount);
+
+      return { movedCount: result.movedCount, failedCount: 0 };
+    } catch (err) {
+      clearInterval(progressInterval);
+      throw err;
+    }
   },
 
   async getProjectImages(projectId: string): Promise<Image[]> {

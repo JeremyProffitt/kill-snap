@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import { Project, ZipFile } from '../types';
+import { TransferBanner, TransferProgress } from './TransferBanner';
 import './ProjectModal.css';
 
 interface ProjectModalProps {
@@ -43,6 +44,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [zipErrors, setZipErrors] = useState<{ [projectId: string]: string[] }>({});
+  const [transferProgress, setTransferProgress] = useState<TransferProgress>({
+    isActive: false,
+    currentFile: '',
+    currentIndex: 0,
+    totalCount: 0,
+    projectName: '',
+    status: 'transferring',
+  });
 
   useEffect(() => {
     if (existingProjects.length > 0) {
@@ -123,15 +132,44 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       return;
     }
 
+    const projectName = existingProjects.find(p => p.projectId === selectedProject)?.name || 'project';
+
     setLoading(true);
     setResult(null);
+    setTransferProgress({
+      isActive: true,
+      currentFile: '',
+      currentIndex: 0,
+      totalCount: 0,
+      projectName,
+      status: 'transferring',
+    });
+
     try {
       const filters = imageFilter === 'all'
         ? { all: true }
         : { group: imageFilter };
 
-      const response = await api.addToProject(selectedProject, filters);
-      const projectName = existingProjects.find(p => p.projectId === selectedProject)?.name || 'project';
+      const response = await api.addToProjectWithProgress(
+        selectedProject,
+        filters,
+        (currentFile, currentIndex, totalCount) => {
+          setTransferProgress(prev => ({
+            ...prev,
+            currentFile,
+            currentIndex,
+            totalCount,
+          }));
+        }
+      );
+
+      setTransferProgress(prev => ({
+        ...prev,
+        currentIndex: response.movedCount,
+        totalCount: response.movedCount,
+        status: 'complete',
+      }));
+
       setResult({
         success: true,
         message: `Moved ${response.movedCount} image(s) to "${projectName}"`
@@ -139,10 +177,22 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       onProjectCreated();
     } catch (err) {
       console.error('Failed to add images to project:', err);
+      setTransferProgress(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: 'Failed to add images to project',
+      }));
       setResult({ success: false, message: 'Failed to add images to project' });
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDismissTransfer = () => {
+    setTransferProgress(prev => ({
+      ...prev,
+      isActive: false,
+    }));
   };
 
   const handleDownloadCatalog = async (project: Project) => {
@@ -300,6 +350,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
   return (
     <div className="project-modal-backdrop" onClick={handleBackdropClick}>
+      <TransferBanner progress={transferProgress} onDismiss={handleDismissTransfer} />
       <div className="project-modal-content">
         <button className="project-modal-close" onClick={onClose} disabled={loading}>
           &times;
