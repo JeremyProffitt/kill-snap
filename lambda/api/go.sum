@@ -1,5 +1,5 @@
-github.com/JeremyProffitt/lrcat-go v0.0.0-20251205091112-501ca2e7cdd1 h1:IAKdtACjx18AWkshg5TkYFCeIHW+wn3oHXNhuzQHruY=
-github.com/JeremyProffitt/lrcat-go v0.0.0-20251205091112-501ca2e7cdd1/go.mod h1:mREZkKaWjB6EAho4GEN+UGXraDGGwJ0llEl0rOdw2SM=
+github.com/JeremyProffitt/lrcat-go v0.0.0-20251206104848-5fcbdffb629b h1:0Wc9YY440YV//rJgb8UmAOx1ubgdi3orU3FU7qMwpUA=
+github.com/JeremyProffitt/lrcat-go v0.0.0-20251206104848-5fcbdffb629b/go.mod h1:mREZkKaWjB6EAho4GEN+UGXraDGGwJ0llEl0rOdw2SM=
 github.com/aws/aws-lambda-go v1.41.0 h1:l/5fyVb6Ud9uYd411xdHZzSf2n86TakxzpvIoz7l+3Y=
 github.com/aws/aws-lambda-go v1.41.0/go.mod h1:jwFe2KmMsHmffA1X2R09hH6lFzJQxzI8qK17ewzbQMM=
 github.com/aws/aws-sdk-go v1.50.0 h1:HBtrLeO+QyDKnc3t1+5DR1RxodOHCGr8ZcrHudpv7jI=

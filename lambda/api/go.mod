@@ -3,7 +3,7 @@ module github.com/kill-snap/api
 go 1.21
 
 require (
-	github.com/JeremyProffitt/lrcat-go v0.0.0-20251205091112-501ca2e7cdd1
+	github.com/JeremyProffitt/lrcat-go v0.0.0-20251206104848-5fcbdffb629b
 	github.com/aws/aws-lambda-go v1.41.0
 	github.com/aws/aws-sdk-go v1.50.0
 	github.com/golang-jwt/jwt/v5 v5.2.0
