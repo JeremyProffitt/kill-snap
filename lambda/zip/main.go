@@ -61,10 +61,11 @@ type ZipFile struct {
 
 // ImageRecord represents an image in DynamoDB
 type ImageRecord struct {
-	ImageGUID    string `json:"imageGUID" dynamodbav:"ImageGUID"`
-	OriginalFile string `json:"originalFile" dynamodbav:"OriginalFile"`
-	FileSize     int64  `json:"fileSize" dynamodbav:"FileSize"`
-	ProjectID    string `json:"projectId,omitempty" dynamodbav:"ProjectID,omitempty"`
+	ImageGUID    string   `json:"imageGUID" dynamodbav:"ImageGUID"`
+	OriginalFile string   `json:"originalFile" dynamodbav:"OriginalFile"`
+	FileSize     int64    `json:"fileSize" dynamodbav:"FileSize"`
+	ProjectID    string   `json:"projectId,omitempty" dynamodbav:"ProjectID,omitempty"`
+	RelatedFiles []string `json:"relatedFiles,omitempty" dynamodbav:"RelatedFiles,omitempty"`
 }
 
 func init() {
@@ -369,7 +370,7 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 	for i, img := range images {
 		fmt.Printf("[%d/%d] Processing: %s\n", i+1, len(images), img.OriginalFile)
 
-		// Get unique filename
+		// Get unique filename for the main image
 		baseName := filepath.Base(img.OriginalFile)
 		fileName := baseName
 		if count, exists := fileNames[baseName]; exists {
@@ -388,6 +389,28 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 			continue
 		}
 		successCount++
+
+		// Add related files (RAW files) to the zip
+		for _, relFile := range img.RelatedFiles {
+			relBaseName := filepath.Base(relFile)
+			relFileName := relBaseName
+			if count, exists := fileNames[relBaseName]; exists {
+				ext := filepath.Ext(relBaseName)
+				name := strings.TrimSuffix(relBaseName, ext)
+				relFileName = fmt.Sprintf("%s_%d%s", name, count+1, ext)
+				fileNames[relBaseName] = count + 1
+				fmt.Printf("  Renamed RAW to avoid duplicate: %s\n", relFileName)
+			} else {
+				fileNames[relBaseName] = 1
+			}
+
+			fmt.Printf("  Adding RAW file: %s\n", relFile)
+			if err := addFileToZip(relFile, relFileName); err != nil {
+				fmt.Printf("  WARNING: Failed to add RAW file %s: %v\n", relFile, err)
+				continue
+			}
+			successCount++
+		}
 	}
 
 	fmt.Printf("Zip content complete. Success: %d, Failed: %d\n", successCount, failCount)

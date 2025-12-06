@@ -321,6 +321,60 @@ func getProjectS3Prefix(project Project) string {
 	return project.ProjectID
 }
 
+// Common RAW file extensions
+var rawExtensions = []string{
+	".cr2", ".cr3", ".nef", ".arw", ".raf", ".orf", ".dng",
+	".rw2", ".pef", ".srw", ".3fr", ".raw", ".rwl", ".mrw",
+	".nrw", ".kdc", ".dcr", ".sr2", ".erf", ".mef", ".mos",
+}
+
+// findRawFiles looks for RAW files with the same base name as the original file
+func findRawFiles(bucket string, originalFile string) []string {
+	var rawFiles []string
+
+	// Get the directory and base name without extension
+	dir := filepath.Dir(originalFile)
+	baseName := strings.TrimSuffix(filepath.Base(originalFile), filepath.Ext(originalFile))
+	baseNameLower := strings.ToLower(baseName)
+
+	// List objects in the same directory
+	prefix := dir + "/"
+	listResult, err := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		fmt.Printf("Warning: failed to list S3 objects for raw file search: %v\n", err)
+		return rawFiles
+	}
+
+	for _, obj := range listResult.Contents {
+		key := *obj.Key
+		fileName := filepath.Base(key)
+		fileNameLower := strings.ToLower(fileName)
+		fileExt := strings.ToLower(filepath.Ext(fileName))
+		fileBaseName := strings.TrimSuffix(fileNameLower, fileExt)
+
+		// Skip if it's the original file itself
+		if key == originalFile {
+			continue
+		}
+
+		// Check if base name matches and extension is a RAW format
+		if fileBaseName == baseNameLower {
+			for _, rawExt := range rawExtensions {
+				if fileExt == rawExt {
+					fmt.Printf("  Found RAW file: %s\n", key)
+					rawFiles = append(rawFiles, key)
+					break
+				}
+			}
+		}
+	}
+
+	return rawFiles
+}
+
 // moveImageFiles moves original, thumbnails, and related files to new location
 func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[string]string, error) {
 	newPaths := make(map[string]string)
@@ -347,7 +401,23 @@ func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[st
 	deleteS3Object(bucket, img.Thumbnail400)
 	newPaths["thumbnail400"] = newThumb400
 
-	// Move related files (same base name, different extensions)
+	// Find and move RAW files (same base name, different extension)
+	rawFiles := findRawFiles(bucket, img.OriginalFile)
+	var movedRawFiles []string
+	for _, rawFile := range rawFiles {
+		rawFilename := filepath.Base(rawFile)
+		newRawPath := destPrefix + "/" + rawFilename
+		fmt.Printf("  Moving RAW file: %s -> %s\n", rawFile, newRawPath)
+		if err := copyS3Object(bucket, rawFile, newRawPath); err != nil {
+			fmt.Printf("  Warning: failed to copy RAW file %s: %v\n", rawFile, err)
+			continue
+		}
+		deleteS3Object(bucket, rawFile)
+		movedRawFiles = append(movedRawFiles, newRawPath)
+	}
+	newPaths["rawFiles"] = strings.Join(movedRawFiles, ",")
+
+	// Move any existing related files
 	for _, relFile := range img.RelatedFiles {
 		relName := filepath.Base(relFile)
 		newRelPath := destPrefix + "/" + relName
@@ -1774,21 +1844,40 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 			continue
 		}
 
+		// Build list of raw files for DynamoDB
+		var rawFilesList []*dynamodb.AttributeValue
+		if rawFilesStr := newPaths["rawFiles"]; rawFilesStr != "" {
+			for _, rf := range strings.Split(rawFilesStr, ",") {
+				if rf != "" {
+					rawFilesList = append(rawFilesList, &dynamodb.AttributeValue{S: aws.String(rf)})
+				}
+			}
+		}
+
 		// Update image record
+		updateExpr := "SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status, ProjectID = :proj, UpdatedDateTime = :updated"
+		exprValues := map[string]*dynamodb.AttributeValue{
+			":orig":    {S: aws.String(newPaths["original"])},
+			":t50":     {S: aws.String(newPaths["thumbnail50"])},
+			":t400":    {S: aws.String(newPaths["thumbnail400"])},
+			":status":  {S: aws.String("project")},
+			":proj":    {S: aws.String(projectID)},
+			":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+		}
+
+		// Add RelatedFiles if we found any RAW files
+		if len(rawFilesList) > 0 {
+			updateExpr += ", RelatedFiles = :rawFiles"
+			exprValues[":rawFiles"] = &dynamodb.AttributeValue{L: rawFilesList}
+		}
+
 		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
 			TableName: aws.String(imageTable),
 			Key: map[string]*dynamodb.AttributeValue{
 				"ImageGUID": {S: aws.String(img.ImageGUID)},
 			},
-			UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status, ProjectID = :proj, UpdatedDateTime = :updated"),
-			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":orig":    {S: aws.String(newPaths["original"])},
-				":t50":     {S: aws.String(newPaths["thumbnail50"])},
-				":t400":    {S: aws.String(newPaths["thumbnail400"])},
-				":status":  {S: aws.String("project")},
-				":proj":    {S: aws.String(projectID)},
-				":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
-			},
+			UpdateExpression: aws.String(updateExpr),
+			ExpressionAttributeValues: exprValues,
 			ExpressionAttributeNames: map[string]*string{
 				"#status": aws.String("Status"),
 			},
