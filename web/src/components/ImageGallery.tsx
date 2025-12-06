@@ -34,15 +34,6 @@ const getFilename = (path: string): string => {
   return parts[parts.length - 1];
 };
 
-// Helper to render star rating
-const renderStars = (rating: number, maxStars: number = 5) => {
-  return Array.from({ length: maxStars }, (_, i) => (
-    <span key={i} className={`star ${i < rating ? 'filled' : 'empty'}`}>
-      {i < rating ? '★' : '☆'}
-    </span>
-  ));
-};
-
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [images, setImages] = useState<Image[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
@@ -53,6 +44,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
+  const [hoverRating, setHoverRating] = useState<{ imageGUID: string; stars: number } | null>(null);
   const [targetProject, setTargetProject] = useState<string>('');
   const [addingToProject, setAddingToProject] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -212,6 +204,28 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const handleLogout = () => {
     authService.logout();
     onLogout();
+  };
+
+  // Handle star rating click on thumbnail
+  const handleThumbnailRating = async (e: React.MouseEvent, image: Image, stars: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (processingId) return;
+
+    // Toggle off if clicking the same rating
+    const newRating = image.rating === stars ? 0 : stars;
+
+    // Optimistic local update
+    handlePropertyChange(image.imageGUID, { rating: newRating });
+
+    // Save to backend
+    try {
+      await api.updateImage(image.imageGUID, { rating: newRating });
+    } catch (err) {
+      console.error('Failed to update rating:', err);
+      // Revert on error
+      handlePropertyChange(image.imageGUID, { rating: image.rating });
+    }
   };
 
   const handleProjectCreated = () => {
@@ -445,8 +459,28 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                             🗑
                           </button>
                         </div>
-                        <div className="thumb-rating">
-                          {renderStars(image.rating ?? 0)}
+                        <div
+                          className="thumb-rating"
+                          onMouseLeave={() => setHoverRating(null)}
+                        >
+                          {[1, 2, 3, 4, 5].map((star) => {
+                            const currentRating = image.rating ?? 0;
+                            const isHovering = hoverRating?.imageGUID === image.imageGUID;
+                            const displayRating = isHovering ? hoverRating.stars : currentRating;
+                            const isFilled = displayRating >= star;
+                            return (
+                              <button
+                                key={star}
+                                type="button"
+                                className={`thumb-star-btn ${isFilled ? 'filled' : 'empty'} ${isHovering && star <= hoverRating.stars ? 'hover-preview' : ''}`}
+                                onClick={(e) => handleThumbnailRating(e, image, star)}
+                                onMouseEnter={() => setHoverRating({ imageGUID: image.imageGUID, stars: star })}
+                                title={`${star} star${star > 1 ? 's' : ''}`}
+                              >
+                                {isFilled ? '★' : '☆'}
+                              </button>
+                            );
+                          })}
                         </div>
                       </>
                     )}
