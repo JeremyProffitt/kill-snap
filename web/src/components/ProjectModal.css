@@ -330,6 +330,76 @@
   cursor: not-allowed;
 }
 
+/* New project details styles for existing projects tab */
+.project-details {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #16213e;
+  border-radius: 8px;
+}
+
+.project-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.project-info-row .project-count {
+  color: #3498db;
+  font-size: 0.9rem;
+}
+
+.project-info-row .project-date {
+  color: #6c7a8a;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.project-select {
+  font-size: 1rem;
+}
+
+.no-projects-message {
+  color: #8892a6;
+  text-align: center;
+  padding: 2rem;
+}
+
+.zip-action-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.generate-zip-btn.failed {
+  background: #e74c3c;
+}
+
+.generate-zip-btn.failed:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+.zip-error-messages {
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.zip-error-message {
+  color: #e74c3c;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  word-break: break-word;
+  margin-bottom: 0.25rem;
+}
+
+.zip-error-message:last-child {
+  margin-bottom: 0;
+}
+
 @media (max-width: 500px) {
   .project-modal-content {
     margin: 0;

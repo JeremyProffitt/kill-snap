@@ -264,15 +264,25 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   return (
     <div className="gallery-container">
-      <header className="gallery-header">
-        <h1>Kill Snap</h1>
-        <div className="header-controls">
-          <div className="filter-group">
-            <label>View Project:</label>
+      <aside className="sidebar">
+        <div className="sidebar-top">
+          <h1 className="sidebar-title">Kill Snap</h1>
+
+          <div className="image-count-container">
+            <span className="image-count-label">
+              {selectedProject ? 'Project' : 'Unreviewed'}
+            </span>
+            <span className="image-count-number">
+              {images.length}
+            </span>
+          </div>
+
+          <div className="sidebar-section">
+            <label className="sidebar-label">Project</label>
             <select
               value={selectedProject}
               onChange={(e) => handleProjectChange(e.target.value)}
-              className="filter-select project-select"
+              className="sidebar-select"
             >
               <option value="">Inbox</option>
               {projects.map((project) => (
@@ -282,14 +292,15 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
               ))}
             </select>
           </div>
+
           {!selectedProject && (
             <>
-              <div className="filter-group">
-                <label>Status:</label>
+              <div className="sidebar-section">
+                <label className="sidebar-label">Status</label>
                 <select
                   value={stateFilter}
                   onChange={(e) => setStateFilter(e.target.value as StateFilter)}
-                  className="filter-select"
+                  className="sidebar-select"
                 >
                   <option value="unreviewed">Unreviewed</option>
                   <option value="approved">Approved</option>
@@ -298,26 +309,39 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   <option value="all">All</option>
                 </select>
               </div>
-              <div className="filter-group">
-                <label>Group:</label>
-                <select
-                  value={groupFilter}
-                  onChange={(e) => setGroupFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
-                  className="filter-select"
-                >
-                  <option value="all">All Groups</option>
+
+              <div className="sidebar-section">
+                <label className="sidebar-label">Group</label>
+                <div className="group-boxes">
+                  <button
+                    className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setGroupFilter('all')}
+                    title="All Groups"
+                  >
+                    All
+                  </button>
                   {GROUP_COLORS.map((group) => (
-                    <option key={group.number} value={group.number}>
-                      {group.number}: {group.name}
-                    </option>
+                    <button
+                      key={group.number}
+                      className={`group-box ${groupFilter === group.number ? 'active' : ''}`}
+                      style={{ backgroundColor: group.color }}
+                      onClick={() => setGroupFilter(group.number)}
+                      title={group.name}
+                    >
+                      {group.number}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
-              <div className="filter-group">
+
+              <div className="sidebar-divider"></div>
+
+              <div className="sidebar-section">
+                <label className="sidebar-label">Projects</label>
                 <select
                   value={targetProject}
                   onChange={(e) => setTargetProject(e.target.value)}
-                  className="filter-select"
+                  className="sidebar-select"
                 >
                   <option value="">Select Project...</option>
                   {projects.map((project) => (
@@ -329,29 +353,39 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 <button
                   onClick={handleAddToProject}
                   disabled={!targetProject || addingToProject}
-                  className="add-to-project-button"
+                  className="sidebar-button primary"
                 >
                   {addingToProject ? 'Adding...' : 'Add to Project'}
                 </button>
               </div>
+
+              <button
+                onClick={() => setShowProjectModal(true)}
+                className="sidebar-button secondary"
+              >
+                Manage
+              </button>
             </>
           )}
-          <button
-            onClick={() => setShowProjectModal(true)}
-            className="projects-button"
-          >
-            Manage Projects
-          </button>
+
+          {selectedProject && (
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="sidebar-button secondary"
+            >
+              Manage
+            </button>
+          )}
         </div>
-        <div className="header-actions">
-          <span className="image-count">
-            {selectedProject ? `project: ${images.length}` : `unreviewed: ${images.length}`}
-          </span>
+
+        <div className="sidebar-bottom">
           <button onClick={handleLogout} className="logout-button">
             Logout
           </button>
         </div>
-      </header>
+      </aside>
+
+      <main className="gallery-main">
 
       {loading ? (
         <div className="loading">Loading images...</div>
@@ -491,6 +525,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           })}
         </div>
       )}
+      </main>
 
       {selectedImage && (
         <ImageModal

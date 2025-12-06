@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import { Project, ZipFile } from '../types';
 import './ProjectModal.css';
@@ -33,7 +33,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   onProjectCreated,
   existingProjects,
 }) => {
-  const [mode, setMode] = useState<'create' | 'add'>('create');
+  const [mode, setMode] = useState<'existing' | 'create' | 'add'>('existing');
   const [projectName, setProjectName] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [imageFilter, setImageFilter] = useState<'all' | number>('all');
@@ -42,12 +42,51 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [generatingZip, setGeneratingZip] = useState<string | null>(null);
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [zipErrors, setZipErrors] = useState<{ [projectId: string]: string[] }>({});
 
   useEffect(() => {
     if (existingProjects.length > 0) {
       setSelectedProject(existingProjects[0].projectId);
     }
   }, [existingProjects]);
+
+  // Check for zip generation timeout
+  const checkZipStatus = useCallback(async (project: Project) => {
+    const generatingZipFile = project.zipFiles?.find(z => z.status === 'generating');
+    if (!generatingZipFile) return;
+
+    try {
+      const response = await api.getZipLogs(project.projectId);
+      if (response.status === 'failed') {
+        setZipErrors(prev => ({
+          ...prev,
+          [project.projectId]: response.errorMessages || ['Zip generation failed']
+        }));
+        onProjectCreated(); // Refresh projects to get updated status
+      }
+    } catch (err) {
+      console.error('Failed to check zip status:', err);
+    }
+  }, [onProjectCreated]);
+
+  // Periodically check for generating zips that might have timed out
+  useEffect(() => {
+    const projectsWithGeneratingZips = existingProjects.filter(
+      p => p.zipFiles?.some(z => z.status === 'generating')
+    );
+
+    if (projectsWithGeneratingZips.length === 0) return;
+
+    // Check immediately for any generating zips
+    projectsWithGeneratingZips.forEach(checkZipStatus);
+
+    // Then check every 30 seconds
+    const interval = setInterval(() => {
+      projectsWithGeneratingZips.forEach(checkZipStatus);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [existingProjects, checkZipStatus]);
 
   const handleCreateProject = async () => {
     if (!projectName.trim()) {
@@ -126,6 +165,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   };
 
   const handleGenerateZip = async (project: Project) => {
+    // Clear any previous errors for this project
+    setZipErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[project.projectId];
+      return newErrors;
+    });
+
     setGeneratingZip(project.projectId);
     setResult(null);
     try {
@@ -174,6 +220,76 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
+  const currentProject = existingProjects.find(p => p.projectId === selectedProject);
+
+  const renderProjectDetails = (project: Project) => {
+    const isGenerating = project.zipFiles?.some(z => z.status === 'generating');
+    const hasFailed = project.zipFiles?.some(z => z.status === 'failed');
+    const completedZips = project.zipFiles?.filter(z => z.status === 'complete') || [];
+    const projectErrors = zipErrors[project.projectId];
+
+    return (
+      <div className="project-details">
+        <div className="project-info-row">
+          <span className="project-count">{project.imageCount} images</span>
+          <span className="project-date">
+            Created: {new Date(project.createdAt).toLocaleDateString()}
+          </span>
+        </div>
+        <div className="project-actions">
+          <button
+            className="download-catalog-btn"
+            onClick={() => handleDownloadCatalog(project)}
+            disabled={downloadingProject === project.projectId || project.imageCount === 0}
+            title={project.imageCount === 0 ? 'No images in project' : 'Download Lightroom Classic Catalog'}
+          >
+            {downloadingProject === project.projectId ? 'Downloading...' : 'Download Lightroom Classic Catalog'}
+          </button>
+          <div className="zip-action-container">
+            <button
+              className={`generate-zip-btn ${hasFailed || projectErrors ? 'failed' : ''}`}
+              onClick={() => handleGenerateZip(project)}
+              disabled={generatingZip === project.projectId || isGenerating || project.imageCount === 0}
+              title={project.imageCount === 0 ? 'No images in project' : 'Generate ZIP file of original images'}
+            >
+              {generatingZip === project.projectId || isGenerating ? 'Generating...' : 'Generate ZIP'}
+            </button>
+            {projectErrors && (
+              <div className="zip-error-messages">
+                {projectErrors.map((error, idx) => (
+                  <div key={idx} className="zip-error-message">{error}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        {completedZips.length > 0 && (
+          <div className="zip-files-list">
+            <span className="zip-files-label">ZIP Files:</span>
+            {completedZips.map((zipFile) => {
+              const zipId = `${project.projectId}-${zipFile.key}`;
+              const filename = zipFile.key.split('/').pop() || 'download.zip';
+              return (
+                <div key={zipFile.key} className="zip-file-item">
+                  <span className="zip-file-info">
+                    {filename} ({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
+                  </span>
+                  <button
+                    className="download-zip-btn"
+                    onClick={() => handleDownloadZip(project, zipFile)}
+                    disabled={downloadingZip === zipId}
+                  >
+                    {downloadingZip === zipId ? 'Downloading...' : 'Download'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="project-modal-backdrop" onClick={handleBackdropClick}>
       <div className="project-modal-content">
@@ -184,6 +300,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         <h2>Project Management</h2>
 
         <div className="project-tabs">
+          <button
+            className={`tab-btn ${mode === 'existing' ? 'active' : ''}`}
+            onClick={() => setMode('existing')}
+            disabled={loading || existingProjects.length === 0}
+          >
+            Existing Projects
+          </button>
           <button
             className={`tab-btn ${mode === 'create' ? 'active' : ''}`}
             onClick={() => setMode('create')}
@@ -200,7 +323,32 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           </button>
         </div>
 
-        {mode === 'create' ? (
+        {mode === 'existing' && (
+          <div className="project-form">
+            {existingProjects.length === 0 ? (
+              <p className="no-projects-message">No projects yet. Create one first!</p>
+            ) : (
+              <>
+                <label>Select Project:</label>
+                <select
+                  value={selectedProject}
+                  onChange={(e) => setSelectedProject(e.target.value)}
+                  disabled={loading}
+                  className="project-select"
+                >
+                  {existingProjects.map((project) => (
+                    <option key={project.projectId} value={project.projectId}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                {currentProject && renderProjectDetails(currentProject)}
+              </>
+            )}
+          </div>
+        )}
+
+        {mode === 'create' && (
           <div className="project-form">
             <label>Project Name:</label>
             <input
@@ -219,7 +367,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               {loading ? 'Creating...' : 'Create Project'}
             </button>
           </div>
-        ) : (
+        )}
+
+        {mode === 'add' && (
           <div className="project-form">
             <label>Select Project:</label>
             <select
@@ -261,73 +411,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         {result && (
           <div className={`project-result ${result.success ? 'success' : 'error'}`}>
             {result.message}
-          </div>
-        )}
-
-        {existingProjects.length > 0 && (
-          <div className="existing-projects">
-            <h3>Existing Projects</h3>
-            <ul>
-              {existingProjects.map((project) => {
-                const isGenerating = project.zipFiles?.some(z => z.status === 'generating');
-                const completedZips = project.zipFiles?.filter(z => z.status === 'complete') || [];
-
-                return (
-                  <li key={project.projectId} className="project-item">
-                    <div className="project-info">
-                      <span className="project-name">{project.name}</span>
-                      <div className="project-meta">
-                        <span className="project-count">{project.imageCount} images</span>
-                        <span className="project-date">
-                          Created: {new Date(project.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="project-actions">
-                      <button
-                        className="download-catalog-btn"
-                        onClick={() => handleDownloadCatalog(project)}
-                        disabled={downloadingProject === project.projectId || project.imageCount === 0}
-                        title={project.imageCount === 0 ? 'No images in project' : 'Download Lightroom Classic Catalog'}
-                      >
-                        {downloadingProject === project.projectId ? 'Downloading...' : 'Download Lightroom Classic Catalog'}
-                      </button>
-                      <button
-                        className="generate-zip-btn"
-                        onClick={() => handleGenerateZip(project)}
-                        disabled={generatingZip === project.projectId || isGenerating || project.imageCount === 0}
-                        title={project.imageCount === 0 ? 'No images in project' : 'Generate ZIP file of original images'}
-                      >
-                        {generatingZip === project.projectId || isGenerating ? 'Generating...' : 'Generate ZIP'}
-                      </button>
-                    </div>
-                    {completedZips.length > 0 && (
-                      <div className="zip-files-list">
-                        <span className="zip-files-label">ZIP Files:</span>
-                        {completedZips.map((zipFile) => {
-                          const zipId = `${project.projectId}-${zipFile.key}`;
-                          const filename = zipFile.key.split('/').pop() || 'download.zip';
-                          return (
-                            <div key={zipFile.key} className="zip-file-item">
-                              <span className="zip-file-info">
-                                {filename} ({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
-                              </span>
-                              <button
-                                className="download-zip-btn"
-                                onClick={() => handleDownloadZip(project, zipFile)}
-                                disabled={downloadingZip === zipId}
-                              >
-                                {downloadingZip === zipId ? 'Downloading...' : 'Download'}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
           </div>
         )}
       </div>

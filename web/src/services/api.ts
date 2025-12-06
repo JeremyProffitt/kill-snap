@@ -133,4 +133,12 @@ export const api = {
     );
     return response.data;
   },
+
+  async getZipLogs(projectId: string): Promise<{ status: string; message: string; errorMessages?: string[]; elapsedMins?: number }> {
+    const response = await axios.get<{ status: string; message: string; errorMessages?: string[]; elapsedMins?: number }>(
+      `${API_BASE_URL}/api/projects/${projectId}/zip-logs`,
+      { headers: authService.getAuthHeader() }
+    );
+    return response.data;
+  },
 };

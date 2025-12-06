@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	lambdasvc "github.com/aws/aws-sdk-go/service/lambda"
@@ -34,6 +35,7 @@ var (
 	ddbClient         *dynamodb.DynamoDB
 	s3Client          *s3.S3
 	lambdaClient      *lambdasvc.Lambda
+	cwLogsClient      *cloudwatchlogs.CloudWatchLogs
 	bucketName        string
 	imageTable        string
 	usersTable        string
@@ -52,6 +54,7 @@ func init() {
 	ddbClient = dynamodb.New(sess)
 	s3Client = s3.New(sess)
 	lambdaClient = lambdasvc.New(sess)
+	cwLogsClient = cloudwatchlogs.New(sess)
 	bucketName = os.Getenv("BUCKET_NAME")
 	imageTable = os.Getenv("IMAGE_TABLE")
 	usersTable = os.Getenv("USERS_TABLE")
@@ -276,30 +279,29 @@ func buildDatePath(t time.Time) string {
 }
 
 // sanitizeS3Name converts a project name to an S3-safe prefix
-// Rules: lowercase, alphanumeric + hyphens, no consecutive hyphens, max 63 chars
+// Rules: lowercase, alphanumeric + underscores, no consecutive underscores, max 63 chars
 func sanitizeS3Name(name string) string {
 	// Convert to lowercase
 	result := strings.ToLower(name)
 
-	// Replace spaces and underscores with hyphens
-	result = strings.ReplaceAll(result, " ", "-")
-	result = strings.ReplaceAll(result, "_", "-")
+	// Replace spaces with underscores
+	result = strings.ReplaceAll(result, " ", "_")
 
-	// Remove any character that's not alphanumeric or hyphen
-	reg := regexp.MustCompile(`[^a-z0-9-]`)
-	result = reg.ReplaceAllString(result, "")
+	// Replace any character that's not alphanumeric or underscore with underscore
+	reg := regexp.MustCompile(`[^a-z0-9_]`)
+	result = reg.ReplaceAllString(result, "_")
 
-	// Replace multiple consecutive hyphens with single hyphen
-	reg = regexp.MustCompile(`-+`)
-	result = reg.ReplaceAllString(result, "-")
+	// Replace multiple consecutive underscores with single underscore
+	reg = regexp.MustCompile(`_+`)
+	result = reg.ReplaceAllString(result, "_")
 
-	// Trim leading/trailing hyphens
-	result = strings.Trim(result, "-")
+	// Trim leading/trailing underscores
+	result = strings.Trim(result, "_")
 
 	// Limit to 63 characters (S3 prefix component limit)
 	if len(result) > 63 {
 		result = result[:63]
-		result = strings.TrimRight(result, "-")
+		result = strings.TrimRight(result, "_")
 	}
 
 	// Ensure we have something
@@ -982,6 +984,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			return handleGetZipDownload(projectID, zipKey, headers)
 		}
 		return errorResponse(400, "Invalid zip download path", headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/zip-logs") && method == "GET":
+		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/zip-logs")
+		return handleGetZipLogs(projectID, headers)
 	default:
 		return errorResponse(404, "Not found", headers)
 	}
@@ -2027,6 +2032,128 @@ func handleGetZipDownload(projectID string, zipKey string, headers map[string]st
 		"url":      url,
 		"filename": filename,
 		"size":     targetZip.Size,
+	})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleGetZipLogs(projectID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Get project to verify it exists
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	// Check if there's a generating zip
+	var generatingZip *ZipFile
+	for i, zf := range project.ZipFiles {
+		if zf.Status == "generating" {
+			generatingZip = &project.ZipFiles[i]
+			break
+		}
+	}
+
+	if generatingZip == nil {
+		body, _ := json.Marshal(map[string]interface{}{
+			"status":  "no_generation",
+			"message": "No zip generation in progress",
+		})
+		return events.APIGatewayProxyResponse{
+			StatusCode: 200,
+			Headers:    headers,
+			Body:       string(body),
+		}, nil
+	}
+
+	// Parse the createdAt timestamp
+	createdAt, err := time.Parse(time.RFC3339, generatingZip.CreatedAt)
+	if err != nil {
+		return errorResponse(500, "Failed to parse generation start time", headers)
+	}
+
+	// Check if 15 minutes have passed
+	elapsed := time.Since(createdAt)
+	if elapsed < 15*time.Minute {
+		body, _ := json.Marshal(map[string]interface{}{
+			"status":      "generating",
+			"message":     "Zip generation in progress",
+			"elapsedMins": int(elapsed.Minutes()),
+		})
+		return events.APIGatewayProxyResponse{
+			StatusCode: 200,
+			Headers:    headers,
+			Body:       string(body),
+		}, nil
+	}
+
+	// 15 minutes have passed, search CloudWatch logs for errors
+	logGroupName := "/aws/lambda/ProjectZipGenerator"
+	startTime := createdAt.Add(-1 * time.Minute).UnixMilli()
+	endTime := createdAt.Add(20 * time.Minute).UnixMilli()
+
+	// Search for error messages in logs
+	filterInput := &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupName:  aws.String(logGroupName),
+		StartTime:     aws.Int64(startTime),
+		EndTime:       aws.Int64(endTime),
+		FilterPattern: aws.String("ERROR"),
+		Limit:         aws.Int64(50),
+	}
+
+	var errorMessages []string
+	filterResult, err := cwLogsClient.FilterLogEvents(filterInput)
+	if err != nil {
+		fmt.Printf("Failed to query CloudWatch logs: %v\n", err)
+		// Still mark as failed even if we can't get logs
+		errorMessages = append(errorMessages, "Zip generation timed out. Unable to retrieve error logs.")
+	} else {
+		for _, event := range filterResult.Events {
+			if event.Message != nil {
+				errorMessages = append(errorMessages, *event.Message)
+			}
+		}
+	}
+
+	if len(errorMessages) == 0 {
+		errorMessages = append(errorMessages, "Zip generation timed out with no error logs found.")
+	}
+
+	// Update the project to mark the zip as failed
+	var updatedZipFiles []ZipFile
+	for _, zf := range project.ZipFiles {
+		if zf.Status == "generating" {
+			zf.Status = "failed"
+		}
+		updatedZipFiles = append(updatedZipFiles, zf)
+	}
+
+	zipFilesList, _ := dynamodbattribute.MarshalList(updatedZipFiles)
+	ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+		UpdateExpression: aws.String("SET ZipFiles = :zips"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":zips": {L: zipFilesList},
+		},
+	})
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"status":        "failed",
+		"message":       "Zip generation failed after timeout",
+		"errorMessages": errorMessages,
 	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
