@@ -315,14 +315,20 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 <div className="group-boxes-row">
                   <button
                     className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}
-                    onClick={() => setGroupFilter('all')}
+                    onClick={() => {
+                      setGroupFilter('all');
+                      setStatusFilter('unreviewed');
+                    }}
                     title="All Groups"
                   >
                     All
                   </button>
                   <button
                     className={`group-box group-ungrouped ${groupFilter === 0 ? 'active' : ''}`}
-                    onClick={() => setGroupFilter(0)}
+                    onClick={() => {
+                      setGroupFilter(0);
+                      setStatusFilter('unreviewed');
+                    }}
                     title="Ungrouped"
                   >
                     Ungrouped
@@ -334,7 +340,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                       key={group.number}
                       className={`group-box ${groupFilter === group.number ? 'active' : ''}`}
                       style={{ backgroundColor: group.color }}
-                      onClick={() => setGroupFilter(group.number)}
+                      onClick={() => {
+                        setGroupFilter(group.number);
+                        setStatusFilter('approved');
+                      }}
                       title={group.name}
                     >
                       {group.number}
