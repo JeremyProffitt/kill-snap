@@ -8,6 +8,7 @@ interface ImageModalProps {
   onClose: () => void;
   onUpdate: () => void;
   onNavigate: (direction: 'prev' | 'next') => void;
+  onPropertyChange: (imageGUID: string, updates: Partial<Image>) => void;
   hasPrev: boolean;
   hasNext: boolean;
   currentIndex: number;
@@ -41,6 +42,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   onClose,
   onUpdate,
   onNavigate,
+  onPropertyChange,
   hasPrev,
   hasNext,
   currentIndex,
@@ -157,6 +159,10 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       const result = await api.regenerateAI(image.imageGUID);
       setKeywords(result.keywords);
       setDescription(result.description);
+      onPropertyChange(image.imageGUID, {
+        keywords: result.keywords,
+        description: result.description
+      });
     } catch (err: any) {
       console.error('Failed to regenerate AI content:', err);
       const message = err.response?.data?.error || 'Failed to regenerate AI content';
@@ -164,37 +170,47 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setRegeneratingAI(false);
     }
-  }, [image.imageGUID]);
+  }, [image.imageGUID, onPropertyChange]);
 
   const handleGroupSelect = useCallback((num: number) => {
     if (!loading) {
       setGroupNumber(num);
       setHasUnsavedChanges(true);
+      const group = GROUP_COLORS.find(g => g.number === num);
+      onPropertyChange(image.imageGUID, {
+        groupNumber: num,
+        colorCode: group?.name.toLowerCase() || 'none'
+      });
     }
-  }, [loading]);
+  }, [loading, image.imageGUID, onPropertyChange]);
 
   const handleRatingSelect = useCallback((stars: number) => {
     if (!loading) {
       setRating(stars);
       setHasUnsavedChanges(true);
+      onPropertyChange(image.imageGUID, { rating: stars });
     }
-  }, [loading]);
+  }, [loading, image.imageGUID, onPropertyChange]);
 
   const handleAddKeyword = useCallback(() => {
     const trimmed = newKeyword.trim();
     if (trimmed && !keywords.includes(trimmed) && !loading) {
-      setKeywords([...keywords, trimmed]);
+      const newKeywords = [...keywords, trimmed];
+      setKeywords(newKeywords);
       setNewKeyword('');
       setHasUnsavedChanges(true);
+      onPropertyChange(image.imageGUID, { keywords: newKeywords });
     }
-  }, [newKeyword, keywords, loading]);
+  }, [newKeyword, keywords, loading, image.imageGUID, onPropertyChange]);
 
   const handleRemoveKeyword = useCallback((keyword: string) => {
     if (!loading) {
-      setKeywords(keywords.filter(k => k !== keyword));
+      const newKeywords = keywords.filter(k => k !== keyword);
+      setKeywords(newKeywords);
       setHasUnsavedChanges(true);
+      onPropertyChange(image.imageGUID, { keywords: newKeywords });
     }
-  }, [keywords, loading]);
+  }, [keywords, loading, image.imageGUID, onPropertyChange]);
 
   const handleKeywordKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {

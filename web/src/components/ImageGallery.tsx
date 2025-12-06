@@ -148,6 +148,15 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   };
 
+  // Update local images array when properties change (for persistence without API call)
+  const handlePropertyChange = useCallback((imageGUID: string, updates: Partial<Image>) => {
+    setImages(prevImages =>
+      prevImages.map(img =>
+        img.imageGUID === imageGUID ? { ...img, ...updates } : img
+      )
+    );
+  }, []);
+
   const handleQuickAction = async (
     e: React.MouseEvent,
     image: Image,
@@ -159,6 +168,16 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     if (processingId) return;
 
     setProcessingId(image.imageGUID);
+
+    // Optimistic local update for immediate feedback
+    if (action === 'approve' && groupNumber !== undefined) {
+      const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
+      handlePropertyChange(image.imageGUID, {
+        groupNumber,
+        colorCode: colorName
+      });
+    }
+
     try {
       if (action === 'delete') {
         await api.deleteImage(image.imageGUID);
@@ -183,6 +202,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } catch (err) {
       console.error(`Failed to ${action} image:`, err);
       alert(`Failed to ${action} image`);
+      // Reload on error to restore correct state
+      await loadImages();
     } finally {
       setProcessingId(null);
     }
@@ -443,6 +464,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           onClose={handleCloseModal}
           onUpdate={handleImageUpdate}
           onNavigate={handleNavigate}
+          onPropertyChange={handlePropertyChange}
           hasPrev={selectedImageIndex! > 0}
           hasNext={selectedImageIndex! < images.length - 1}
           currentIndex={selectedImageIndex!}
