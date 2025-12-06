@@ -382,23 +382,30 @@ func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[st
 	// Move original file
 	origFilename := filepath.Base(img.OriginalFile)
 	newOriginal := destPrefix + "/" + origFilename
-	if err := copyS3Object(bucket, img.OriginalFile, newOriginal); err != nil {
-		return nil, fmt.Errorf("failed to copy original: %v", err)
+	// Skip if source and destination are the same (already in correct location)
+	if img.OriginalFile != newOriginal {
+		if err := copyS3Object(bucket, img.OriginalFile, newOriginal); err != nil {
+			return nil, fmt.Errorf("failed to copy original: %v", err)
+		}
+		deleteS3Object(bucket, img.OriginalFile)
 	}
-	deleteS3Object(bucket, img.OriginalFile)
 	newPaths["original"] = newOriginal
 
 	// Move thumbnails
 	thumb50Name := filepath.Base(img.Thumbnail50)
 	newThumb50 := destPrefix + "/" + thumb50Name
-	copyS3Object(bucket, img.Thumbnail50, newThumb50)
-	deleteS3Object(bucket, img.Thumbnail50)
+	if img.Thumbnail50 != newThumb50 {
+		copyS3Object(bucket, img.Thumbnail50, newThumb50)
+		deleteS3Object(bucket, img.Thumbnail50)
+	}
 	newPaths["thumbnail50"] = newThumb50
 
 	thumb400Name := filepath.Base(img.Thumbnail400)
 	newThumb400 := destPrefix + "/" + thumb400Name
-	copyS3Object(bucket, img.Thumbnail400, newThumb400)
-	deleteS3Object(bucket, img.Thumbnail400)
+	if img.Thumbnail400 != newThumb400 {
+		copyS3Object(bucket, img.Thumbnail400, newThumb400)
+		deleteS3Object(bucket, img.Thumbnail400)
+	}
 	newPaths["thumbnail400"] = newThumb400
 
 	// Find and move RAW files (same base name, different extension)
@@ -407,6 +414,11 @@ func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[st
 	for _, rawFile := range rawFiles {
 		rawFilename := filepath.Base(rawFile)
 		newRawPath := destPrefix + "/" + rawFilename
+		// Skip if source and destination are the same
+		if rawFile == newRawPath {
+			movedRawFiles = append(movedRawFiles, newRawPath)
+			continue
+		}
 		fmt.Printf("  Moving RAW file: %s -> %s\n", rawFile, newRawPath)
 		if err := copyS3Object(bucket, rawFile, newRawPath); err != nil {
 			fmt.Printf("  Warning: failed to copy RAW file %s: %v\n", rawFile, err)
@@ -421,8 +433,11 @@ func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[st
 	for _, relFile := range img.RelatedFiles {
 		relName := filepath.Base(relFile)
 		newRelPath := destPrefix + "/" + relName
-		copyS3Object(bucket, relFile, newRelPath)
-		deleteS3Object(bucket, relFile)
+		// Skip if source and destination are the same
+		if relFile != newRelPath {
+			copyS3Object(bucket, relFile, newRelPath)
+			deleteS3Object(bucket, relFile)
+		}
 	}
 
 	return newPaths, nil
@@ -1531,6 +1546,15 @@ func handleDeleteImage(imageID string, headers map[string]string) (events.APIGat
 
 	var img ImageResponse
 	dynamodbattribute.UnmarshalMap(result.Item, &img)
+
+	// Check if image is already deleted
+	if img.Status == "deleted" {
+		return events.APIGatewayProxyResponse{
+			StatusCode: 200,
+			Headers:    headers,
+			Body:       `{"success": true, "message": "Image already deleted"}`,
+		}, nil
+	}
 
 	// Get date from EXIF for folder structure
 	imageDate := getImageDate(img)
