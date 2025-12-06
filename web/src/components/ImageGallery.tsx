@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api, ImageFilters } from '../services/api';
 import { authService } from '../services/auth';
 import { Image, Project } from '../types';
@@ -41,7 +41,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
+  const loadImagesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stateFilter, setStateFilter] = useState<StateFilter>('unreviewed');
   const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -168,6 +169,17 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     setNotification(null);
   }, []);
 
+  // Debounced loadImages for batch operations
+  const debouncedLoadImages = useCallback(() => {
+    if (loadImagesTimeoutRef.current) {
+      clearTimeout(loadImagesTimeoutRef.current);
+    }
+    loadImagesTimeoutRef.current = setTimeout(() => {
+      loadImages();
+      loadImagesTimeoutRef.current = null;
+    }, 500);
+  }, [loadImages]);
+
   const handleQuickAction = async (
     e: React.MouseEvent,
     image: Image,
@@ -176,47 +188,68 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   ) => {
     e.stopPropagation();
     e.preventDefault();
-    if (processingId) return;
 
-    setProcessingId(image.imageGUID);
+    const imageId = image.imageGUID;
+
+    // Check if this specific image is already being processed
+    if (processingIds.has(imageId)) return;
+
+    // Add this image to processing set
+    setProcessingIds(prev => new Set(prev).add(imageId));
 
     // Optimistic local update for immediate feedback
     if (action === 'approve' && groupNumber !== undefined) {
       const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
-      handlePropertyChange(image.imageGUID, {
+      handlePropertyChange(imageId, {
         groupNumber,
         colorCode: colorName
       });
+    } else if (action === 'delete') {
+      // Optimistic update: mark as deleted locally
+      handlePropertyChange(imageId, { status: 'deleted' });
+    } else if (action === 'undelete') {
+      // Optimistic update: mark as inbox (restored) locally
+      handlePropertyChange(imageId, { status: 'inbox' });
     }
 
     try {
       if (action === 'delete') {
-        await api.deleteImage(image.imageGUID);
+        await api.deleteImage(imageId);
+        // Use debounced reload for delete to allow batching
+        debouncedLoadImages();
       } else if (action === 'undelete') {
-        await api.undeleteImage(image.imageGUID);
+        await api.undeleteImage(imageId);
+        // Use debounced reload for undelete to allow batching
+        debouncedLoadImages();
       } else if (action === 'approve' && groupNumber !== undefined) {
         const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
-        await api.updateImage(image.imageGUID, {
+        await api.updateImage(imageId, {
           groupNumber,
           colorCode: colorName,
           promoted: false,
           reviewed: 'true',
         });
+        await loadImages();
       } else if (action === 'reject') {
-        await api.updateImage(image.imageGUID, {
+        await api.updateImage(imageId, {
           groupNumber: 0,
           colorCode: 'white',
           reviewed: 'true',
         });
+        await loadImages();
       }
-      await loadImages();
     } catch (err) {
       console.error(`Failed to ${action} image:`, err);
       showNotification(`Failed to ${action} image`, 'error');
       // Reload on error to restore correct state
       await loadImages();
     } finally {
-      setProcessingId(null);
+      // Remove this image from processing set
+      setProcessingIds(prev => {
+        const next = new Set(prev);
+        next.delete(imageId);
+        return next;
+      });
     }
   };
 
@@ -229,7 +262,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const handleThumbnailRating = async (e: React.MouseEvent, image: Image, stars: number) => {
     e.stopPropagation();
     e.preventDefault();
-    if (processingId) return;
+    if (processingIds.has(image.imageGUID)) return;
 
     // Toggle off if clicking the same rating
     const newRating = image.rating === stars ? 0 : stars;
@@ -481,7 +514,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
             return (
               <div
                 key={image.imageGUID}
-                className={`gallery-item ${processingId === image.imageGUID ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
+                className={`gallery-item ${processingIds.has(image.imageGUID) ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
                 onClick={() => handleImageClick(index)}
               >
                 <div
