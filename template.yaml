@@ -218,6 +218,47 @@ Resources:
                 - !Sub ${ImageMetadataTable.Arn}/index/*
                 - !GetAtt ProjectsTable.Arn
 
+  # Lambda function for nightly DynamoDB-S3 sync (removes orphaned DynamoDB records)
+  SyncFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: DynamoDBSyncFunction
+      Runtime: provided.al2023
+      CodeUri: lambda/sync/
+      Handler: bootstrap
+      MemorySize: 256
+      Timeout: 900  # 15 minutes max for scanning large tables
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref S3BucketName
+          IMAGE_TABLE: !Ref ImageMetadataTable
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:HeadObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+                - !Sub 'arn:aws:s3:::${S3BucketName}'
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:DeleteItem
+              Resource:
+                - !GetAtt ImageMetadataTable.Arn
+      Events:
+        NightlySync:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 7 * * ? *)  # 2am EST / 7am UTC daily
+            Description: Nightly sync to remove orphaned DynamoDB records
+            Enabled: true
+
   # API Gateway REST API
   ImageReviewApi:
     Type: AWS::Serverless::Api
