@@ -947,6 +947,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/images/") && strings.HasSuffix(path, "/regenerate-ai") && method == "POST":
 		imageID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/images/"), "/regenerate-ai")
 		return handleRegenerateAI(imageID, headers)
+	case strings.HasPrefix(path, "/api/images/") && strings.HasSuffix(path, "/undelete") && method == "POST":
+		imageID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/images/"), "/undelete")
+		return handleUndeleteImage(imageID, headers)
 	case strings.HasPrefix(path, "/api/images/") && method == "DELETE":
 		imageID := strings.TrimPrefix(path, "/api/images/")
 		return handleDeleteImage(imageID, headers)
@@ -1070,10 +1073,34 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 			},
 		}
 		result, err = ddbClient.Query(input)
-	case "all":
-		// Scan all images
+	case "deleted":
+		// Scan for deleted images (Status = "deleted")
 		scanResult, scanErr := ddbClient.Scan(&dynamodb.ScanInput{
-			TableName: aws.String(imageTable),
+			TableName:        aws.String(imageTable),
+			FilterExpression: aws.String("#status = :deleted"),
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":deleted": {S: aws.String("deleted")},
+			},
+		})
+		if scanErr != nil {
+			err = scanErr
+		} else {
+			result = &dynamodb.QueryOutput{Items: scanResult.Items}
+		}
+	case "all":
+		// Scan all images (excluding deleted)
+		scanResult, scanErr := ddbClient.Scan(&dynamodb.ScanInput{
+			TableName:        aws.String(imageTable),
+			FilterExpression: aws.String("attribute_not_exists(#status) OR #status <> :deleted"),
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":deleted": {S: aws.String("deleted")},
+			},
 		})
 		if scanErr != nil {
 			err = scanErr
@@ -1094,6 +1121,11 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 	for _, item := range result.Items {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
+
+		// Skip deleted images unless specifically querying for them
+		if stateFilter != "deleted" && img.Status == "deleted" {
+			continue
+		}
 
 		// Filter by state (approved vs rejected)
 		if stateFilter == "approved" && img.GroupNumber == 0 {
@@ -1432,6 +1464,70 @@ func handleDeleteImage(imageID string, headers map[string]string) (events.APIGat
 			":t400":    {S: aws.String(newPaths["thumbnail400"])},
 			":status":  {S: aws.String("deleted")},
 			":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
+		},
+		ExpressionAttributeNames: map[string]*string{
+			"#status": aws.String("Status"),
+		},
+	})
+
+	if err != nil {
+		fmt.Printf("Error updating metadata: %v\n", err)
+		return errorResponse(500, "Failed to update metadata", headers)
+	}
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       `{"success": true}`,
+	}, nil
+}
+
+func handleUndeleteImage(imageID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Get image metadata first
+	result, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageID)},
+		},
+	})
+
+	if err != nil || result.Item == nil {
+		return errorResponse(404, "Image not found", headers)
+	}
+
+	var img ImageResponse
+	dynamodbattribute.UnmarshalMap(result.Item, &img)
+
+	// Verify image is deleted
+	if img.Status != "deleted" {
+		return errorResponse(400, "Image is not deleted", headers)
+	}
+
+	// Get date from EXIF for folder structure
+	imageDate := getImageDate(img)
+	datePath := buildDatePath(imageDate)
+	destPrefix := "inbox/" + datePath
+
+	// Move all files back to inbox folder
+	newPaths, err := moveImageFiles(bucketName, img, destPrefix)
+	if err != nil {
+		fmt.Printf("Error moving files: %v\n", err)
+		return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
+	}
+
+	// Update DynamoDB with new paths and reset status
+	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageID)},
+		},
+		UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, Reviewed = :reviewed, UpdatedDateTime = :updated REMOVE #status"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":orig":     {S: aws.String(newPaths["original"])},
+			":t50":      {S: aws.String(newPaths["thumbnail50"])},
+			":t400":     {S: aws.String(newPaths["thumbnail400"])},
+			":reviewed": {S: aws.String("false")},
+			":updated":  {S: aws.String(time.Now().Format(time.RFC3339))},
 		},
 		ExpressionAttributeNames: map[string]*string{
 			"#status": aws.String("Status"),

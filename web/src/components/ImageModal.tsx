@@ -53,6 +53,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [regeneratingAI, setRegeneratingAI] = useState(false);
   const [description, setDescription] = useState<string>('');
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const isDeleted = image.status === 'deleted';
 
@@ -63,7 +65,27 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     setKeywords(image.keywords || []);
     setDescription(image.description || '');
     setNewKeyword('');
+    setHoverRating(null);
+    setHasUnsavedChanges(false);
   }, [image.imageGUID, image.groupNumber, image.rating, image.keywords, image.description]);
+
+  // Auto-save changes silently
+  const saveChanges = useCallback(async () => {
+    if (!hasUnsavedChanges || loading || isDeleted) return;
+
+    try {
+      const group = GROUP_COLORS.find(g => g.number === groupNumber);
+      await api.updateImage(image.imageGUID, {
+        groupNumber,
+        colorCode: group?.name.toLowerCase() || 'none',
+        rating,
+        keywords,
+      });
+      setHasUnsavedChanges(false);
+    } catch (err) {
+      console.error('Failed to auto-save changes:', err);
+    }
+  }, [hasUnsavedChanges, loading, isDeleted, groupNumber, rating, keywords, image.imageGUID]);
 
   const handleApprove = useCallback(async () => {
     setLoading(true);
@@ -147,12 +169,14 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const handleGroupSelect = useCallback((num: number) => {
     if (!loading) {
       setGroupNumber(num);
+      setHasUnsavedChanges(true);
     }
   }, [loading]);
 
   const handleRatingSelect = useCallback((stars: number) => {
     if (!loading) {
       setRating(stars);
+      setHasUnsavedChanges(true);
     }
   }, [loading]);
 
@@ -161,12 +185,14 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     if (trimmed && !keywords.includes(trimmed) && !loading) {
       setKeywords([...keywords, trimmed]);
       setNewKeyword('');
+      setHasUnsavedChanges(true);
     }
   }, [newKeyword, keywords, loading]);
 
   const handleRemoveKeyword = useCallback((keyword: string) => {
     if (!loading) {
       setKeywords(keywords.filter(k => k !== keyword));
+      setHasUnsavedChanges(true);
     }
   }, [keywords, loading]);
 
@@ -178,17 +204,19 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     }
   }, [handleAddKeyword]);
 
-  const handlePrev = useCallback(() => {
+  const handlePrev = useCallback(async () => {
     if (hasPrev && !loading) {
+      await saveChanges();
       onNavigate('prev');
     }
-  }, [hasPrev, loading, onNavigate]);
+  }, [hasPrev, loading, onNavigate, saveChanges]);
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback(async () => {
     if (hasNext && !loading) {
+      await saveChanges();
       onNavigate('next');
     }
-  }, [hasNext, loading, onNavigate]);
+  }, [hasNext, loading, onNavigate, saveChanges]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -387,18 +415,26 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   </button>
                 ))}
               </div>
-              <div className="rating-stars">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    className={`star-btn ${rating >= star ? 'filled' : 'empty'}`}
-                    onClick={() => handleRatingSelect(star === rating ? 0 : star)}
-                    disabled={loading}
-                    title={`${star} star${star > 1 ? 's' : ''}`}
-                  >
-                    {rating >= star ? '★' : '☆'}
-                  </button>
-                ))}
+              <div
+                className="rating-stars"
+                onMouseLeave={() => setHoverRating(null)}
+              >
+                {[1, 2, 3, 4, 5].map((star) => {
+                  const displayRating = hoverRating !== null ? hoverRating : rating;
+                  const isFilled = displayRating >= star;
+                  return (
+                    <button
+                      key={star}
+                      className={`star-btn ${isFilled ? 'filled' : 'empty'} ${hoverRating !== null && star <= hoverRating ? 'hover-preview' : ''}`}
+                      onClick={() => handleRatingSelect(star === rating ? 0 : star)}
+                      onMouseEnter={() => setHoverRating(star)}
+                      disabled={loading}
+                      title={`${star} star${star > 1 ? 's' : ''}`}
+                    >
+                      {isFilled ? '★' : '☆'}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

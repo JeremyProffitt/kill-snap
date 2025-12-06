@@ -150,11 +150,12 @@ Resources:
       CodeUri: lambda/thumbnail/
       Handler: bootstrap
       MemorySize: 512
-      Timeout: 60
+      Timeout: 90
       Environment:
         Variables:
           BUCKET_NAME: !Ref S3BucketName
           DYNAMODB_TABLE: !Ref ImageMetadataTable
+          OPENAI_API_KEY: !Ref OpenAIApiKey
       Policies:
         - Version: '2012-10-17'
           Statement:
