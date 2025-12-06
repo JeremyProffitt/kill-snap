@@ -199,4 +199,11 @@ export const api = {
     );
     return response.data;
   },
+
+  async deleteZip(projectId: string, zipKey: string): Promise<void> {
+    await axios.delete(
+      `${API_BASE_URL}/api/projects/${projectId}/zips/${encodeURIComponent(zipKey)}`,
+      { headers: authService.getAuthHeader() }
+    );
+  },
 };

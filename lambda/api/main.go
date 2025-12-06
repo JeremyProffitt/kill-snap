@@ -1062,6 +1062,19 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/zip-logs") && method == "GET":
 		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/zip-logs")
 		return handleGetZipLogs(projectID, headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.Contains(path, "/zips/") && method == "DELETE":
+		// Extract projectID and zipKey from path: /api/projects/{projectId}/zips/{zipKey}
+		parts := strings.Split(path, "/")
+		if len(parts) >= 6 {
+			projectID := parts[3]
+			zipKeyEncoded := strings.Join(parts[5:], "/")
+			zipKey, err := url.QueryUnescape(zipKeyEncoded)
+			if err != nil {
+				zipKey = zipKeyEncoded
+			}
+			return handleDeleteZip(projectID, zipKey, headers)
+		}
+		return errorResponse(400, "Invalid zip delete path", headers)
 	default:
 		return errorResponse(404, "Not found", headers)
 	}
@@ -2248,6 +2261,85 @@ func handleGetZipLogs(projectID string, headers map[string]string) (events.APIGa
 		"status":        "failed",
 		"message":       "Zip generation failed after timeout",
 		"errorMessages": errorMessages,
+	})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleDeleteZip(projectID string, zipKey string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Get project to verify it exists and find the zip
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	// Find and remove the zip from the list
+	var updatedZipFiles []ZipFile
+	var foundZip *ZipFile
+	for _, zf := range project.ZipFiles {
+		if zf.Key == zipKey {
+			foundZip = &zf
+		} else {
+			updatedZipFiles = append(updatedZipFiles, zf)
+		}
+	}
+
+	if foundZip == nil {
+		return errorResponse(404, "Zip file not found", headers)
+	}
+
+	// Delete the file from S3
+	_, err = s3Client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(zipKey),
+	})
+	if err != nil {
+		fmt.Printf("Warning: Failed to delete zip from S3: %v\n", err)
+		// Continue anyway to remove from database
+	}
+
+	// Update project record to remove the zip from the list
+	if len(updatedZipFiles) > 0 {
+		zipFilesList, _ := dynamodbattribute.MarshalList(updatedZipFiles)
+		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(projectsTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ProjectID": {S: aws.String(projectID)},
+			},
+			UpdateExpression: aws.String("SET ZipFiles = :zips"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":zips": {L: zipFilesList},
+			},
+		})
+	} else {
+		// Remove ZipFiles attribute entirely if no zips left
+		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(projectsTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ProjectID": {S: aws.String(projectID)},
+			},
+			UpdateExpression: aws.String("REMOVE ZipFiles"),
+		})
+	}
+
+	if err != nil {
+		return errorResponse(500, "Failed to update project", headers)
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"message": "Zip file deleted",
 	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,

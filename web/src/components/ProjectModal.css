@@ -300,6 +300,11 @@
   margin-bottom: 0.5rem;
 }
 
+.zip-file-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .zip-file-info {
   font-size: 0.8rem;
   color: #b8c2d0;
@@ -316,7 +321,7 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  width: 100%;
+  flex: 1;
   text-align: center;
 }
 
@@ -325,6 +330,28 @@
 }
 
 .download-zip-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.delete-zip-btn {
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  background: #e74c3c;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.delete-zip-btn:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+.delete-zip-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

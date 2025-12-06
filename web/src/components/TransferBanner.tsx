@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import './TransferBanner.css';
 
 export interface TransferProgress {
@@ -14,9 +14,20 @@ export interface TransferProgress {
 interface TransferBannerProps {
   progress: TransferProgress;
   onDismiss?: () => void;
+  autoHideMs?: number;
 }
 
-export const TransferBanner: React.FC<TransferBannerProps> = ({ progress, onDismiss }) => {
+export const TransferBanner: React.FC<TransferBannerProps> = ({ progress, onDismiss, autoHideMs = 15000 }) => {
+  // Auto-dismiss after 15 seconds when complete or error
+  useEffect(() => {
+    if (progress.isActive && (progress.status === 'complete' || progress.status === 'error') && onDismiss && autoHideMs > 0) {
+      const timer = setTimeout(() => {
+        onDismiss();
+      }, autoHideMs);
+      return () => clearTimeout(timer);
+    }
+  }, [progress.isActive, progress.status, onDismiss, autoHideMs]);
+
   if (!progress.isActive) return null;
 
   const percentage = progress.totalCount > 0

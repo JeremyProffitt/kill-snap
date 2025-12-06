@@ -5,6 +5,7 @@ import { Image, Project } from '../types';
 import { ImageModal } from './ImageModal';
 import { ProjectModal } from './ProjectModal';
 import { TransferBanner, TransferProgress } from './TransferBanner';
+import { NotificationBanner, Notification } from './NotificationBanner';
 import './ImageGallery.css';
 
 interface ImageGalleryProps {
@@ -57,6 +58,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     projectName: '',
     status: 'transferring',
   });
+  const [notification, setNotification] = useState<Notification | null>(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -158,6 +160,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     );
   }, []);
 
+  const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info') => {
+    setNotification({ id: Date.now().toString(), message, type });
+  }, []);
+
+  const dismissNotification = useCallback(() => {
+    setNotification(null);
+  }, []);
+
   const handleQuickAction = async (
     e: React.MouseEvent,
     image: Image,
@@ -202,7 +212,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       await loadImages();
     } catch (err) {
       console.error(`Failed to ${action} image:`, err);
-      alert(`Failed to ${action} image`);
+      showNotification(`Failed to ${action} image`, 'error');
       // Reload on error to restore correct state
       await loadImages();
     } finally {
@@ -314,6 +324,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   return (
     <div className="gallery-container">
       <TransferBanner progress={transferProgress} onDismiss={handleDismissTransfer} />
+      <NotificationBanner notification={notification} onDismiss={dismissNotification} />
       <aside className="sidebar">
         <div className="sidebar-top">
           <h1 className="sidebar-title">Kill Snap</h1>
@@ -602,6 +613,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           onUpdate={handleImageUpdate}
           onNavigate={handleNavigate}
           onPropertyChange={handlePropertyChange}
+          onNotify={showNotification}
           hasPrev={selectedImageIndex! > 0}
           hasNext={selectedImageIndex! < images.length - 1}
           currentIndex={selectedImageIndex!}

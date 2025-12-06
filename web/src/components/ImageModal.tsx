@@ -9,6 +9,7 @@ interface ImageModalProps {
   onUpdate: () => void;
   onNavigate: (direction: 'prev' | 'next') => void;
   onPropertyChange: (imageGUID: string, updates: Partial<Image>) => void;
+  onNotify: (message: string, type: 'success' | 'error' | 'info') => void;
   hasPrev: boolean;
   hasNext: boolean;
   currentIndex: number;
@@ -43,6 +44,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   onUpdate,
   onNavigate,
   onPropertyChange,
+  onNotify,
   hasPrev,
   hasNext,
   currentIndex,
@@ -104,7 +106,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       onUpdate();
     } catch (err) {
       console.error('Failed to approve image:', err);
-      alert('Failed to approve image');
+      onNotify('Failed to approve image', 'error');
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       onUpdate();
     } catch (err) {
       console.error('Failed to reject image:', err);
-      alert('Failed to reject image');
+      onNotify('Failed to reject image', 'error');
     } finally {
       setLoading(false);
     }
@@ -134,7 +136,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       onUpdate();
     } catch (err) {
       console.error('Failed to delete image:', err);
-      alert('Failed to delete image');
+      onNotify('Failed to delete image', 'error');
     } finally {
       setLoading(false);
     }
@@ -147,7 +149,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       onUpdate();
     } catch (err) {
       console.error('Failed to undelete image:', err);
-      alert('Failed to undelete image');
+      onNotify('Failed to undelete image', 'error');
     } finally {
       setLoading(false);
     }
@@ -166,7 +168,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } catch (err: any) {
       console.error('Failed to regenerate AI content:', err);
       const message = err.response?.data?.error || 'Failed to regenerate AI content';
-      alert(message);
+      onNotify(message, 'error');
     } finally {
       setRegeneratingAI(false);
     }

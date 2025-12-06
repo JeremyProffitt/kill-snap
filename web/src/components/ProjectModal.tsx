@@ -42,6 +42,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [downloadingProject, setDownloadingProject] = useState<string | null>(null);
   const [generatingZip, setGeneratingZip] = useState<string | null>(null);
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
+  const [deletingZip, setDeletingZip] = useState<string | null>(null);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [zipErrors, setZipErrors] = useState<{ [projectId: string]: string[] }>({});
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
@@ -272,6 +273,25 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
+  const handleDeleteZip = async (project: Project, zipFile: ZipFile) => {
+    const zipId = `${project.projectId}-${zipFile.key}`;
+    setDeletingZip(zipId);
+    setResult(null);
+    try {
+      await api.deleteZip(project.projectId, zipFile.key);
+      setResult({
+        success: true,
+        message: `Zip file deleted`
+      });
+      onProjectCreated(); // Refresh projects to see updated status
+    } catch (err: any) {
+      console.error('Failed to delete zip:', err);
+      setResult({ success: false, message: 'Failed to delete zip file' });
+    } finally {
+      setDeletingZip(null);
+    }
+  };
+
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -332,13 +352,23 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   <span className="zip-file-info">
                     {filename} ({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
                   </span>
-                  <button
-                    className="download-zip-btn"
-                    onClick={() => handleDownloadZip(project, zipFile)}
-                    disabled={downloadingZip === zipId}
-                  >
-                    {downloadingZip === zipId ? 'Downloading...' : 'Download'}
-                  </button>
+                  <div className="zip-file-actions">
+                    <button
+                      className="download-zip-btn"
+                      onClick={() => handleDownloadZip(project, zipFile)}
+                      disabled={downloadingZip === zipId || deletingZip === zipId}
+                    >
+                      {downloadingZip === zipId ? 'Downloading...' : 'Download'}
+                    </button>
+                    <button
+                      className="delete-zip-btn"
+                      onClick={() => handleDeleteZip(project, zipFile)}
+                      disabled={downloadingZip === zipId || deletingZip === zipId}
+                      title="Delete zip file"
+                    >
+                      {deletingZip === zipId ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
                 </div>
               );
             })}

@@ -355,10 +355,23 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 		return nil
 	}
 
-	// Add lrcat catalog file first if available
+	// Add lrcat catalog file first if available, renamed to match project name
 	if catalogPath != "" {
 		fmt.Printf("Adding catalog file to zip: %s\n", catalogPath)
-		catalogFileName := filepath.Base(catalogPath)
+		// Extract project name from zipKey (format: projects/{s3Prefix}/{sanitizedName}_{date}.zip)
+		zipBase := filepath.Base(zipKey)
+		// Remove date suffix and .zip extension to get project name
+		catalogFileName := strings.TrimSuffix(zipBase, ".zip")
+		// Remove _partN suffix if present
+		if idx := strings.LastIndex(catalogFileName, "_part"); idx > 0 {
+			catalogFileName = catalogFileName[:idx]
+		}
+		// Remove date suffix (last underscore and date)
+		if idx := strings.LastIndex(catalogFileName, "_"); idx > 0 {
+			catalogFileName = catalogFileName[:idx]
+		}
+		catalogFileName = catalogFileName + ".lrcat"
+		fmt.Printf("  Renaming catalog to: %s\n", catalogFileName)
 		if err := addFileToZip(catalogPath, catalogFileName); err != nil {
 			fmt.Printf("  WARNING: Failed to add catalog to zip: %v\n", err)
 		} else {
