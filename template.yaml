@@ -139,29 +139,9 @@ Resources:
         - AttributeName: ProjectID
           KeyType: HASH
 
-  # CloudWatch Log Groups with 7-day retention
-  ThumbnailFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/ImageThumbnailGenerator
-      RetentionInDays: 7
-
-  ZipGeneratorFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/ProjectZipGenerator
-      RetentionInDays: 7
-
-  ApiFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/lambda/ImageReviewApi
-      RetentionInDays: 7
-
   # Lambda function for thumbnail generation
   ThumbnailFunction:
     Type: AWS::Serverless::Function
-    DependsOn: ThumbnailFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
@@ -201,7 +181,6 @@ Resources:
   # Lambda function for project zip generation
   ZipGeneratorFunction:
     Type: AWS::Serverless::Function
-    DependsOn: ZipGeneratorFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
@@ -252,7 +231,6 @@ Resources:
   # Lambda function for API backend
   ApiFunction:
     Type: AWS::Serverless::Function
-    DependsOn: ApiFunctionLogGroup
     Metadata:
       BuildMethod: makefile
     Properties:
