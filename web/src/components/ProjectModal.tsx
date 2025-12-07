@@ -320,22 +320,22 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               return (
                 <div key={zipFile.key} className="zip-file-item">
                   <span className="zip-file-info">
-                    <a
-                      href="#"
+                    <button
+                      type="button"
                       className="zip-file-link"
-                      onClick={(e) => {
-                        e.preventDefault();
+                      onClick={() => {
                         if (downloadingZip !== zipId && deletingZip !== zipId) {
                           handleDownloadZip(project, zipFile);
                         }
                       }}
-                      style={{ pointerEvents: downloadingZip === zipId || deletingZip === zipId ? 'none' : 'auto' }}
+                      disabled={downloadingZip === zipId || deletingZip === zipId}
                     >
                       {downloadingZip === zipId ? 'Downloading...' : filename}
-                    </a>
+                    </button>
                     {' '}({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
                   </span>
                   <button
+                    type="button"
                     className="delete-zip-btn"
                     onClick={() => handleDeleteZip(project, zipFile)}
                     disabled={downloadingZip === zipId || deletingZip === zipId}

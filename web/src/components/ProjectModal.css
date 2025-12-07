@@ -287,15 +287,24 @@
 }
 
 .zip-file-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
   color: #3498db;
   text-decoration: none;
   cursor: pointer;
   transition: color 0.15s ease;
 }
 
-.zip-file-link:hover {
+.zip-file-link:hover:not(:disabled) {
   color: #5dade2;
   text-decoration: underline;
+}
+
+.zip-file-link:disabled {
+  color: #8892a6;
+  cursor: not-allowed;
 }
 
 .delete-zip-btn {
