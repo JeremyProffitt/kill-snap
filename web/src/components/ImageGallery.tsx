@@ -868,7 +868,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                     <div className="date-action-buttons">
                       <button
                         type="button"
-                        className="date-action-btn approve"
+                        className="action-btn-mini approve"
                         onClick={() => handleDateBulkAction(dateGroup.images, 'approve', 1)}
                         title="Approve all"
                       >
@@ -876,7 +876,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                       </button>
                       <button
                         type="button"
-                        className="date-action-btn reject"
+                        className="action-btn-mini reject"
                         onClick={() => handleDateBulkAction(dateGroup.images, 'reject')}
                         title="Reject all"
                       >
@@ -884,7 +884,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                       </button>
                       <button
                         type="button"
-                        className="date-action-btn delete"
+                        className="action-btn-mini delete"
                         onClick={() => handleDateBulkAction(dateGroup.images, 'delete')}
                         title="Delete all"
                       >

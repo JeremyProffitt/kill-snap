@@ -303,36 +303,6 @@
   gap: 0.25rem;
 }
 
-.date-action-btn {
-  width: 26px;
-  height: 22px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: transform 0.15s, filter 0.15s;
-}
-
-.date-action-btn.approve {
-  background: #27ae60;
-  color: white;
-}
-
-.date-action-btn.reject {
-  background: #e67e22;
-  color: white;
-}
-
-.date-action-btn.delete {
-  background: #c0392b;
-  color: white;
-}
-
-.date-action-btn:hover {
-  transform: scale(1.1);
-  filter: brightness(1.15);
-}
-
 .gallery-grid {
   column-count: 4;
   column-gap: 1.25rem;
