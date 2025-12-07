@@ -102,7 +102,8 @@
 }
 
 .add-project-btn {
-  padding: 0.75rem 1rem;
+  width: 100px;
+  padding: 0.75rem 0;
   border: none;
   border-radius: 8px;
   background: #2ecc71;
@@ -112,6 +113,7 @@
   cursor: pointer;
   transition: all 0.15s ease;
   white-space: nowrap;
+  text-align: center;
 }
 
 .add-project-btn:hover:not(:disabled) {
@@ -175,7 +177,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-top: 0.5rem;
 }
 
 .project-info-row .project-date {
@@ -239,12 +241,19 @@
 .zip-file-item {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   padding: 0.5rem;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   margin-bottom: 0.5rem;
+}
+
+.zip-file-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .zip-file-link {
@@ -271,7 +280,6 @@
 }
 
 .zip-file-meta {
-  flex: 1;
   font-size: 0.75rem;
   color: #6c7a8a;
   text-align: right;

@@ -259,12 +259,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
     return (
       <div className="project-details">
-        <div className="project-info-row">
-          <span className="project-date">
-            Created: {new Date(project.createdAt).toLocaleDateString()}
-          </span>
-          <span className="project-count">{project.imageCount} images</span>
-        </div>
         <div className="project-actions">
           <div className="zip-action-container">
             <button
@@ -292,21 +286,23 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               const filename = zipFile.key.split('/').pop() || 'download.zip';
               return (
                 <div key={zipFile.key} className="zip-file-item">
-                  <button
-                    type="button"
-                    className="zip-file-link"
-                    onClick={() => {
-                      if (downloadingZip !== zipId && deletingZip !== zipId) {
-                        handleDownloadZip(project, zipFile);
-                      }
-                    }}
-                    disabled={downloadingZip === zipId || deletingZip === zipId}
-                  >
-                    {downloadingZip === zipId ? 'Downloading...' : filename}
-                  </button>
-                  <span className="zip-file-meta">
-                    {formatFileSize(zipFile.size)}, {zipFile.imageCount} images
-                  </span>
+                  <div className="zip-file-info">
+                    <button
+                      type="button"
+                      className="zip-file-link"
+                      onClick={() => {
+                        if (downloadingZip !== zipId && deletingZip !== zipId) {
+                          handleDownloadZip(project, zipFile);
+                        }
+                      }}
+                      disabled={downloadingZip === zipId || deletingZip === zipId}
+                    >
+                      {downloadingZip === zipId ? 'Downloading...' : filename}
+                    </button>
+                    <span className="zip-file-meta">
+                      {formatFileSize(zipFile.size)}, {zipFile.imageCount} images
+                    </span>
+                  </div>
                   <button
                     type="button"
                     className="delete-zip-btn"
@@ -373,6 +369,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     + Add
                   </button>
                 </div>
+                {currentProject && (
+                  <div className="project-info-row">
+                    <span className="project-date">
+                      Created: {new Date(currentProject.createdAt).toLocaleDateString()}
+                    </span>
+                    <span className="project-count">{currentProject.imageCount} images</span>
+                  </div>
+                )}
               </div>
 
               {currentProject && renderProjectDetails(currentProject)}
