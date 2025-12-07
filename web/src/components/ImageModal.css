@@ -445,6 +445,7 @@
 }
 
 .keyword-add-btn {
+  width: 100px;
   padding: 0.25rem 0.5rem;
   background: #3498db;
   color: white;
@@ -466,6 +467,7 @@
 }
 
 .ai-generate-btn {
+  width: 200px;
   padding: 0.25rem 0.6rem;
   background: #9b59b6;
   color: white;
