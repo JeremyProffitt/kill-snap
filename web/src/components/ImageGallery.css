@@ -227,10 +227,57 @@
   color: #e74c3c;
 }
 
+/* Date sections container */
+.gallery-sections {
+  padding: 1rem 2rem;
+}
+
+.date-section {
+  margin-bottom: 2rem;
+}
+
+.date-section:last-child {
+  margin-bottom: 0;
+}
+
+.date-section-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0 0.5rem;
+}
+
+.date-section-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #3a4a6a, transparent);
+}
+
+.date-section-title {
+  color: #a8b8d8;
+  font-size: 0.95rem;
+  font-weight: 500;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.date-section-count {
+  color: #6a7a9a;
+  font-size: 0.85rem;
+  font-weight: 400;
+  margin-left: 0.5rem;
+}
+
 .gallery-grid {
   column-count: 4;
   column-gap: 1.25rem;
   padding: 2rem;
+}
+
+/* Gallery grid inside date sections doesn't need extra padding */
+.date-section .gallery-grid {
+  padding: 0;
 }
 
 @media (max-width: 1400px) {

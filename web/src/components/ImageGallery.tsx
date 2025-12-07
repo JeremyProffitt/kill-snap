@@ -496,6 +496,28 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     return images.filter(img => getImageDate(img) === selectedDate);
   }, [images, selectedDate]);
 
+  // Group filtered images by date (sorted newest first)
+  const imagesByDate = React.useMemo(() => {
+    const groups: { date: string; images: Image[] }[] = [];
+    const dateMap: Record<string, Image[]> = {};
+
+    filteredImages.forEach(img => {
+      const date = getImageDate(img);
+      if (!dateMap[date]) {
+        dateMap[date] = [];
+      }
+      dateMap[date].push(img);
+    });
+
+    // Sort dates descending (newest first)
+    const sortedDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
+    sortedDates.forEach(date => {
+      groups.push({ date, images: dateMap[date] });
+    });
+
+    return groups;
+  }, [filteredImages]);
+
   // Use filteredImages for display, but keep selectedImageIndex relative to filteredImages
   const selectedImage = selectedImageIndex !== null ? filteredImages[selectedImageIndex] : null;
   const currentProject = projects.find(p => p.projectId === selectedProject);
@@ -724,129 +746,149 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           <p>No {selectedDate ? `images for ${formatDateForDisplay(selectedDate)}` : stateFilter === 'all' ? '' : stateFilter + ' images'} found</p>
         </div>
       ) : (
-        <div className="gallery-grid">
-          {filteredImages.map((image, index) => {
-            const isDeleted = image.status === 'deleted';
+        <div className="gallery-sections">
+          {imagesByDate.map((dateGroup) => {
+            // Calculate the starting index for this date group in filteredImages
+            const startIndex = filteredImages.findIndex(img => img.imageGUID === dateGroup.images[0].imageGUID);
+
             return (
-              <div
-                key={image.imageGUID}
-                className={`gallery-item ${processingIds.has(image.imageGUID) ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
-                onClick={() => handleImageClick(index)}
-              >
-                <div
-                  className="thumbnail-container"
-                  style={{
-                    aspectRatio: image.width && image.height
-                      ? `${image.width} / ${image.height}`
-                      : '1 / 1'
-                  }}
-                >
-                  <img
-                    src={api.getImageUrl(image.bucket, image.thumbnail400)}
-                    alt={image.originalFile}
-                    className="thumbnail"
-                  />
-                  {(image.moveStatus === 'pending' || image.moveStatus === 'moving') && (
-                    <div className="move-status-indicator">
-                      <span className="spinner"></span>
-                      <span className="status-text">
-                        {image.moveStatus === 'pending' ? 'Queued' : 'Moving...'}
-                      </span>
-                    </div>
-                  )}
-                  {image.moveStatus === 'failed' && (
-                    <div className="move-status-indicator error">
-                      <span className="status-text">Move Failed</span>
-                    </div>
-                  )}
+              <div key={dateGroup.date} className="date-section">
+                <div className="date-section-header">
+                  <div className="date-section-line"></div>
+                  <span className="date-section-title">
+                    {formatDateForDisplay(dateGroup.date)}
+                    <span className="date-section-count">({dateGroup.images.length})</span>
+                  </span>
+                  <div className="date-section-line"></div>
                 </div>
-                <div className="image-info">
-                  {/* Row 1: Filename left, dimensions + size right */}
-                  <div className="info-row-1">
-                    <span className="thumb-filename">{getFilename(image.originalFile)}</span>
-                    <span className="thumb-size-info">
-                      {image.width}×{image.height} - {formatFileSize(image.fileSize)}
-                    </span>
-                  </div>
-                  {/* Row 2: Colors left, actions center, rating right */}
-                  <div className="info-row-2">
-                    {isDeleted ? (
-                      <button
-                        type="button"
-                        className="undelete-btn"
-                        onClick={(e) => handleQuickAction(e, image, 'undelete')}
-                        title="Undelete"
+                <div className="gallery-grid">
+                  {dateGroup.images.map((image, localIndex) => {
+                    const globalIndex = startIndex + localIndex;
+                    const isDeleted = image.status === 'deleted';
+                    return (
+                      <div
+                        key={image.imageGUID}
+                        className={`gallery-item ${processingIds.has(image.imageGUID) ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
+                        onClick={() => handleImageClick(globalIndex)}
                       >
-                        ↩ Undelete
-                      </button>
-                    ) : (
-                      <>
-                        <div className="thumb-colors">
-                          {GROUP_COLORS.slice(1).map((group) => (
-                            <button
-                              key={group.number}
-                              type="button"
-                              className={`color-btn ${image.groupNumber === group.number ? 'selected' : ''}`}
-                              style={{ backgroundColor: group.color }}
-                              onClick={(e) => handleQuickAction(e, image, 'approve', group.number)}
-                              title={`${group.name} (${group.number})`}
-                            >
-                              {group.number}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="thumb-actions">
-                          <button
-                            type="button"
-                            className="action-btn-mini approve"
-                            onClick={(e) => handleQuickAction(e, image, 'approve', image.groupNumber || 1)}
-                            title="Approve"
-                          >
-                            ✓
-                          </button>
-                          <button
-                            type="button"
-                            className="action-btn-mini reject"
-                            onClick={(e) => handleQuickAction(e, image, 'reject')}
-                            title="Reject"
-                          >
-                            ✗
-                          </button>
-                          <button
-                            type="button"
-                            className="action-btn-mini delete"
-                            onClick={(e) => handleQuickAction(e, image, 'delete')}
-                            title="Delete"
-                          >
-                            🗑
-                          </button>
-                        </div>
                         <div
-                          className="thumb-rating"
-                          onMouseLeave={() => setHoverRating(null)}
+                          className="thumbnail-container"
+                          style={{
+                            aspectRatio: image.width && image.height
+                              ? `${image.width} / ${image.height}`
+                              : '1 / 1'
+                          }}
                         >
-                          {[1, 2, 3, 4, 5].map((star) => {
-                            const currentRating = image.rating ?? 0;
-                            const isHovering = hoverRating?.imageGUID === image.imageGUID;
-                            const displayRating = isHovering ? hoverRating.stars : currentRating;
-                            const isFilled = displayRating >= star;
-                            return (
-                              <button
-                                key={star}
-                                type="button"
-                                className={`thumb-star-btn ${isFilled ? 'filled' : 'empty'} ${isHovering && star <= hoverRating.stars ? 'hover-preview' : ''}`}
-                                onClick={(e) => handleThumbnailRating(e, image, star)}
-                                onMouseEnter={() => setHoverRating({ imageGUID: image.imageGUID, stars: star })}
-                                title={`${star} star${star > 1 ? 's' : ''}`}
-                              >
-                                {isFilled ? '★' : '☆'}
-                              </button>
-                            );
-                          })}
+                          <img
+                            src={api.getImageUrl(image.bucket, image.thumbnail400)}
+                            alt={image.originalFile}
+                            className="thumbnail"
+                          />
+                          {(image.moveStatus === 'pending' || image.moveStatus === 'moving') && (
+                            <div className="move-status-indicator">
+                              <span className="spinner"></span>
+                              <span className="status-text">
+                                {image.moveStatus === 'pending' ? 'Queued' : 'Moving...'}
+                              </span>
+                            </div>
+                          )}
+                          {image.moveStatus === 'failed' && (
+                            <div className="move-status-indicator error">
+                              <span className="status-text">Move Failed</span>
+                            </div>
+                          )}
                         </div>
-                      </>
-                    )}
-                  </div>
+                        <div className="image-info">
+                          {/* Row 1: Filename left, dimensions + size right */}
+                          <div className="info-row-1">
+                            <span className="thumb-filename">{getFilename(image.originalFile)}</span>
+                            <span className="thumb-size-info">
+                              {image.width}×{image.height} - {formatFileSize(image.fileSize)}
+                            </span>
+                          </div>
+                          {/* Row 2: Colors left, actions center, rating right */}
+                          <div className="info-row-2">
+                            {isDeleted ? (
+                              <button
+                                type="button"
+                                className="undelete-btn"
+                                onClick={(e) => handleQuickAction(e, image, 'undelete')}
+                                title="Undelete"
+                              >
+                                ↩ Undelete
+                              </button>
+                            ) : (
+                              <>
+                                <div className="thumb-colors">
+                                  {GROUP_COLORS.slice(1).map((group) => (
+                                    <button
+                                      key={group.number}
+                                      type="button"
+                                      className={`color-btn ${image.groupNumber === group.number ? 'selected' : ''}`}
+                                      style={{ backgroundColor: group.color }}
+                                      onClick={(e) => handleQuickAction(e, image, 'approve', group.number)}
+                                      title={`${group.name} (${group.number})`}
+                                    >
+                                      {group.number}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="thumb-actions">
+                                  <button
+                                    type="button"
+                                    className="action-btn-mini approve"
+                                    onClick={(e) => handleQuickAction(e, image, 'approve', image.groupNumber || 1)}
+                                    title="Approve"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="action-btn-mini reject"
+                                    onClick={(e) => handleQuickAction(e, image, 'reject')}
+                                    title="Reject"
+                                  >
+                                    ✗
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="action-btn-mini delete"
+                                    onClick={(e) => handleQuickAction(e, image, 'delete')}
+                                    title="Delete"
+                                  >
+                                    🗑
+                                  </button>
+                                </div>
+                                <div
+                                  className="thumb-rating"
+                                  onMouseLeave={() => setHoverRating(null)}
+                                >
+                                  {[1, 2, 3, 4, 5].map((star) => {
+                                    const currentRating = image.rating ?? 0;
+                                    const isHovering = hoverRating?.imageGUID === image.imageGUID;
+                                    const displayRating = isHovering ? hoverRating.stars : currentRating;
+                                    const isFilled = displayRating >= star;
+                                    return (
+                                      <button
+                                        key={star}
+                                        type="button"
+                                        className={`thumb-star-btn ${isFilled ? 'filled' : 'empty'} ${isHovering && star <= hoverRating.stars ? 'hover-preview' : ''}`}
+                                        onClick={(e) => handleThumbnailRating(e, image, star)}
+                                        onMouseEnter={() => setHoverRating({ imageGUID: image.imageGUID, stars: star })}
+                                        title={`${star} star${star > 1 ? 's' : ''}`}
+                                      >
+                                        {isFilled ? '★' : '☆'}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
