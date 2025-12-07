@@ -37,6 +37,43 @@ const getFilename = (path: string): string => {
   return parts[parts.length - 1];
 };
 
+// Extract date from image (prefer EXIF DateTimeOriginal, fall back to InsertedDateTime)
+const getImageDate = (image: Image): string => {
+  // Try EXIF DateTimeOriginal first
+  if (image.exifData?.DateTimeOriginal) {
+    const cleaned = image.exifData.DateTimeOriginal.replace(/"/g, '');
+    // EXIF format: "2024:01:15 14:30:00" -> "2024-01-15"
+    const match = cleaned.match(/^(\d{4}):(\d{2}):(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+  }
+  // Try DateTime
+  if (image.exifData?.DateTime) {
+    const cleaned = image.exifData.DateTime.replace(/"/g, '');
+    const match = cleaned.match(/^(\d{4}):(\d{2}):(\d{2})/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+  }
+  // Fall back to InsertedDateTime
+  if (image.insertedDateTime) {
+    return image.insertedDateTime.split('T')[0];
+  }
+  return 'Unknown';
+};
+
+// Format date for display (e.g., "2024-01-15" -> "Jan 15, 2024")
+const formatDateForDisplay = (dateStr: string): string => {
+  if (dateStr === 'Unknown') return 'Unknown Date';
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [images, setImages] = useState<Image[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
@@ -48,6 +85,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [hoverRating, setHoverRating] = useState<{ imageGUID: string; stars: number } | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [targetProject, setTargetProject] = useState<string>('');
   const [addingToProject, setAddingToProject] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -317,6 +355,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   const handleProjectChange = (projectId: string) => {
     setSelectedProject(projectId);
+    setSelectedDate(''); // Clear date filter when changing projects
     if (projectId) {
       // Clear filters when viewing a project
       setStateFilter('all');
@@ -438,7 +477,27 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   };
 
-  const selectedImage = selectedImageIndex !== null ? images[selectedImageIndex] : null;
+  // Calculate date counts from all loaded images
+  const dateCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    images.forEach(img => {
+      const date = getImageDate(img);
+      counts[date] = (counts[date] || 0) + 1;
+    });
+    // Sort dates descending (newest first)
+    return Object.entries(counts)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, count]) => ({ date, count }));
+  }, [images]);
+
+  // Filter images by selected date
+  const filteredImages = React.useMemo(() => {
+    if (!selectedDate) return images;
+    return images.filter(img => getImageDate(img) === selectedDate);
+  }, [images, selectedDate]);
+
+  // Use filteredImages for display, but keep selectedImageIndex relative to filteredImages
+  const selectedImage = selectedImageIndex !== null ? filteredImages[selectedImageIndex] : null;
   const currentProject = projects.find(p => p.projectId === selectedProject);
   const completedZips = currentProject?.zipFiles?.filter(z => z.status === 'complete') || [];
   const isGeneratingZipForProject = currentProject?.zipFiles?.some(z => z.status === 'generating') || false;
@@ -454,11 +513,27 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
           <div className="image-count-container">
             <span className="image-count-label">
-              {selectedProject ? 'Project' : 'Unreviewed'}
+              {selectedProject ? 'Project' : selectedDate ? 'Date' : 'Unreviewed'}
             </span>
             <span className="image-count-number">
-              {images.length}
+              {filteredImages.length}
             </span>
+          </div>
+
+          <div className="sidebar-section">
+            <label className="sidebar-label">View by Date</label>
+            <select
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="sidebar-select"
+            >
+              <option value="">All Dates</option>
+              {dateCounts.map(({ date, count }) => (
+                <option key={date} value={date}>
+                  {formatDateForDisplay(date)} ({count})
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="sidebar-section">
@@ -644,13 +719,13 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         <div className="loading">Loading images...</div>
       ) : error ? (
         <div className="error-message">{error}</div>
-      ) : images.length === 0 ? (
+      ) : filteredImages.length === 0 ? (
         <div className="empty-state">
-          <p>No {stateFilter === 'all' ? '' : stateFilter} images found</p>
+          <p>No {selectedDate ? `images for ${formatDateForDisplay(selectedDate)}` : stateFilter === 'all' ? '' : stateFilter + ' images'} found</p>
         </div>
       ) : (
         <div className="gallery-grid">
-          {images.map((image, index) => {
+          {filteredImages.map((image, index) => {
             const isDeleted = image.status === 'deleted';
             return (
               <div

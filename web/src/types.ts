@@ -19,6 +19,8 @@ export interface Image {
   status?: 'inbox' | 'approved' | 'rejected' | 'deleted' | 'project';
   projectId?: string;
   moveStatus?: 'pending' | 'moving' | 'complete' | 'failed';
+  insertedDateTime?: string;
+  updatedDateTime?: string;
 }
 
 export interface LoginRequest {
