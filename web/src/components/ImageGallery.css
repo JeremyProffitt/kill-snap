@@ -80,6 +80,10 @@
   margin: 0.25rem 0;
 }
 
+.sidebar-divider.double-margin {
+  margin: 0.5rem 0;
+}
+
 .sidebar-button {
   padding: 0.35rem;
   border: none;
@@ -709,16 +713,15 @@
   margin-top: 0.5rem;
 }
 
-/* Projects header with inline Add button */
-.projects-header {
+/* Projects buttons row */
+.projects-buttons-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  gap: 0.25rem;
 }
 
 .add-project-inline-btn {
-  width: 80px;
-  padding: 0.2rem 0;
+  flex: 1;
+  padding: 0.3rem 0;
   border: none;
   border-radius: 3px;
   background: #2ecc71;
@@ -732,4 +735,22 @@
 
 .add-project-inline-btn:hover {
   background: #27ae60;
+}
+
+.manage-projects-btn {
+  flex: 1;
+  padding: 0.3rem 0;
+  border: none;
+  border-radius: 3px;
+  background: #3498db;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.manage-projects-btn:hover {
+  background: #2980b9;
 }

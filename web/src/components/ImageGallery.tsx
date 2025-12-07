@@ -536,6 +536,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 </div>
               </div>
 
+              <div className="sidebar-divider double-margin"></div>
+
               {/* Add to Project section - below color buttons */}
               <div className="sidebar-section add-to-project-section">
                 <select
@@ -559,27 +561,23 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 </button>
               </div>
 
-              <div className="sidebar-divider"></div>
-
               <div className="sidebar-section">
-                <div className="projects-header">
-                  <label className="sidebar-label">Projects</label>
+                <div className="projects-buttons-row">
                   <button
                     onClick={() => setShowAddProjectDialog(true)}
                     className="add-project-inline-btn"
                     title="Add new project"
                   >
-                    + Add
+                    Add Project
+                  </button>
+                  <button
+                    onClick={() => setShowProjectModal(true)}
+                    className="manage-projects-btn"
+                  >
+                    Manage Projects
                   </button>
                 </div>
               </div>
-
-              <button
-                onClick={() => setShowProjectModal(true)}
-                className="sidebar-button secondary"
-              >
-                Manage
-              </button>
             </>
           )}
 

@@ -16,9 +16,8 @@ interface ImageModalProps {
   totalImages: number;
 }
 
-// Lightroom color labels: Red, Yellow, Green, Blue, Purple
+// Lightroom color labels: Red, Yellow, Green, Blue, Purple (no white/0)
 const GROUP_COLORS = [
-  { number: 0, color: '#ffffff', name: 'None', textColor: '#333' },
   { number: 1, color: '#e74c3c', name: 'Red', textColor: '#fff' },
   { number: 2, color: '#f1c40f', name: 'Yellow', textColor: '#333' },
   { number: 3, color: '#2ecc71', name: 'Green', textColor: '#fff' },
@@ -262,8 +261,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         return;
       }
 
-      // Number keys 0-5 for group selection (Lightroom colors)
-      if (key >= '0' && key <= '5' && !isDeleted) {
+      // Number keys 1-5 for group selection (Lightroom colors)
+      if (key >= '1' && key <= '5' && !isDeleted) {
         e.preventDefault();
         handleGroupSelect(parseInt(key));
         return;
@@ -363,53 +362,55 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             </button>
           </div>
 
-          {/* Image info bar: filename left, actions center, dimensions right */}
+          {/* Action buttons centered under image */}
+          <div className="action-buttons-row">
+            {isDeleted ? (
+              <button
+                type="button"
+                className="action-btn undelete"
+                onClick={handleUndelete}
+                disabled={loading}
+                title="Undelete (U)"
+              >
+                ↩ Undelete
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="action-btn approve"
+                  onClick={handleApprove}
+                  disabled={loading}
+                  title="Approve (Enter)"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  className="action-btn reject"
+                  onClick={handleReject}
+                  disabled={loading}
+                  title="Reject (R)"
+                >
+                  ✗
+                </button>
+                <button
+                  type="button"
+                  className="action-btn delete"
+                  onClick={handleDelete}
+                  disabled={loading}
+                  title="Delete (D)"
+                >
+                  🗑
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Image info bar: filename left, dimensions right */}
           <div className="image-info-bar">
             <div className="info-left">
               <span className="info-filename">{getFilename(image.originalFile)}</span>
-            </div>
-            <div className="info-center">
-              {isDeleted ? (
-                <button
-                  type="button"
-                  className="action-btn undelete"
-                  onClick={handleUndelete}
-                  disabled={loading}
-                  title="Undelete (U)"
-                >
-                  ↩ Undelete
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="action-btn approve"
-                    onClick={handleApprove}
-                    disabled={loading}
-                    title="Approve (Enter)"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    className="action-btn reject"
-                    onClick={handleReject}
-                    disabled={loading}
-                    title="Reject (R)"
-                  >
-                    ✗
-                  </button>
-                  <button
-                    type="button"
-                    className="action-btn delete"
-                    onClick={handleDelete}
-                    disabled={loading}
-                    title="Delete (D)"
-                  >
-                    🗑
-                  </button>
-                </>
-              )}
             </div>
             <div className="info-right">
               <span className="info-dimensions">{image.width}×{image.height} - {formatFileSize(image.fileSize)}</span>
@@ -462,30 +463,28 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
           <div className="keywords-section">
             <div className="keywords-header">
-              <span className="keywords-label">Keywords:</span>
-              <button
-                className="regenerate-ai-btn"
-                onClick={handleRegenerateAI}
-                disabled={loading || regeneratingAI}
-                title="Regenerate AI keywords and description"
-              >
-                {regeneratingAI ? 'Analyzing...' : 'Regenerate AI'}
-              </button>
+              <span className="keywords-label">Keywords</span>
             </div>
-            <div className="keywords-container">
-              {keywords.map((keyword) => (
-                <span key={keyword} className="keyword-tag">
-                  {keyword}
-                  <button
-                    type="button"
-                    className="keyword-remove"
-                    onClick={() => handleRemoveKeyword(keyword)}
-                    disabled={loading}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
+            <div className="keywords-list">
+              {keywords.length > 0 ? (
+                keywords.map((keyword, index) => (
+                  <span key={keyword} className="keyword-item">
+                    {keyword}
+                    <button
+                      type="button"
+                      className="keyword-delete-btn"
+                      onClick={() => handleRemoveKeyword(keyword)}
+                      disabled={loading}
+                      title="Remove keyword"
+                    >
+                      ×
+                    </button>
+                    {index < keywords.length - 1 && <span className="keyword-comma">,</span>}
+                  </span>
+                ))
+              ) : (
+                <span className="no-keywords">No keywords</span>
+              )}
             </div>
             <div className="keyword-input-row">
               <input
@@ -505,6 +504,14 @@ export const ImageModal: React.FC<ImageModalProps> = ({
               >
                 Add
               </button>
+              <button
+                className="ai-generate-btn"
+                onClick={handleRegenerateAI}
+                disabled={loading || regeneratingAI}
+                title="Ask AI to generate keywords and description"
+              >
+                {regeneratingAI ? 'Analyzing...' : 'Ask AI to Generate'}
+              </button>
             </div>
           </div>
 
@@ -519,7 +526,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
           <div className="keyboard-hints">
             <span>← → Nav</span>
-            <span>0-5 Color</span>
+            <span>1-5 Color</span>
             <span>Enter {isDeleted ? 'Undelete' : 'Approve'}</span>
             {!isDeleted && <span>R Reject</span>}
             {!isDeleted && <span>D Delete</span>}
