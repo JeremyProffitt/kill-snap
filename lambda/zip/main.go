@@ -214,6 +214,10 @@ func getProjectImages(projectID string) ([]ImageRecord, error) {
 		for _, item := range page.Items {
 			var img ImageRecord
 			if err := dynamodbattribute.UnmarshalMap(item, &img); err == nil {
+				// Debug: print raw DynamoDB Rating value if present
+				if ratingAttr, ok := item["Rating"]; ok && ratingAttr.N != nil {
+					fmt.Printf("  Raw DynamoDB Rating for %s: %s, Unmarshaled: %d\n", img.ImageGUID, *ratingAttr.N, img.Rating)
+				}
 				images = append(images, img)
 			} else {
 				fmt.Printf("WARNING: Failed to unmarshal image record: %v\n", err)
@@ -312,6 +316,8 @@ func getColorLabel(groupNumber int) string {
 
 // generateXMPContent creates XMP sidecar content for a RAW file
 func generateXMPContent(img ImageRecord, projectName string) string {
+	fmt.Printf("  XMP Generation - Rating: %d, GroupNumber: %d, Keywords: %v\n", img.Rating, img.GroupNumber, img.Keywords)
+
 	// Build keywords string
 	keywordsXML := ""
 	if len(img.Keywords) > 0 {
