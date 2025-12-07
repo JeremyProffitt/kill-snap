@@ -108,7 +108,7 @@ type ImageResponse struct {
 type UpdateImageRequest struct {
 	GroupNumber int      `json:"groupNumber,omitempty"`
 	ColorCode   string   `json:"colorCode,omitempty"`
-	Rating      int      `json:"rating,omitempty"`
+	Rating      *int     `json:"rating,omitempty"`
 	Promoted    bool     `json:"promoted,omitempty"`
 	Reviewed    string   `json:"reviewed,omitempty"`
 	Keywords    []string `json:"keywords,omitempty"`
@@ -1119,10 +1119,10 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		exprAttrValues[":promoted"] = &dynamodb.AttributeValue{BOOL: aws.Bool(true)}
 	}
 
-	// Rating is 0-5, where 0 means no rating
-	if updateReq.Rating >= 0 && updateReq.Rating <= 5 {
+	// Rating is 0-5, where 0 means no rating (only update if explicitly provided)
+	if updateReq.Rating != nil && *updateReq.Rating >= 0 && *updateReq.Rating <= 5 {
 		updateExpr += ", Rating = :rating"
-		exprAttrValues[":rating"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", updateReq.Rating))}
+		exprAttrValues[":rating"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", *updateReq.Rating))}
 	}
 
 	// Update keywords if provided

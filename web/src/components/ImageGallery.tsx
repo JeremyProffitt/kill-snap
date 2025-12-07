@@ -5,6 +5,7 @@ import { Image, Project } from '../types';
 import { ImageModal } from './ImageModal';
 import { ProjectModal } from './ProjectModal';
 import { TransferBanner, TransferProgress } from './TransferBanner';
+import { ZipProgressBanner } from './ZipProgressBanner';
 import { NotificationBanner, Notification } from './NotificationBanner';
 import './ImageGallery.css';
 
@@ -300,8 +301,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   };
 
-  const handleProjectCreated = () => {
-    loadProjects();
+  const handleProjectCreated = async () => {
+    await loadProjects();
     loadImages();
   };
 
@@ -376,6 +377,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   return (
     <div className="gallery-container">
+      <ZipProgressBanner projects={projects} onComplete={loadProjects} />
       <TransferBanner progress={transferProgress} onDismiss={handleDismissTransfer} />
       <NotificationBanner notification={notification} onDismiss={dismissNotification} />
       <aside className="sidebar">

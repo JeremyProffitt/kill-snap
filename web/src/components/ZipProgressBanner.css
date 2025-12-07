@@ -1,0 +1,98 @@
+.zip-progress-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.zip-progress-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: #7c3aed;
+  color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.zip-progress-item.complete {
+  background: #16a34a;
+}
+
+.zip-progress-item.failed {
+  background: #dc2626;
+}
+
+.zip-progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.zip-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.zip-check {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.zip-error {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.zip-progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.zip-progress-title {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.zip-progress-time {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.zip-progress-error {
+  font-size: 12px;
+  opacity: 0.9;
+  max-width: 500px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

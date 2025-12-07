@@ -261,7 +261,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         success: true,
         message: `Zip file deleted`
       });
-      onProjectCreated(); // Refresh projects to see updated status
+      // Immediately refresh projects to update the UI
+      await onProjectCreated();
     } catch (err: any) {
       console.error('Failed to delete zip:', err);
       setResult({ success: false, message: 'Failed to delete zip file' });

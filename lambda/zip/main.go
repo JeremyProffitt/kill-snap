@@ -616,14 +616,7 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 				continue
 			}
 			successCount++
-
-			// Also add XMP sidecar for maximum compatibility
-			xmpFileName := strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".xmp"
-			if err := addContentToZip([]byte(xmpContent), xmpFileName); err != nil {
-				fmt.Printf("  WARNING: Failed to add XMP sidecar for %s: %v\n", fileName, err)
-			} else {
-				fmt.Printf("  Added XMP sidecar: %s\n", xmpFileName)
-			}
+			// XMP is embedded in JPEG, no sidecar file needed
 		} else {
 			// For non-JPEG files, just add to zip directly
 			if err := addFileToZip(img.OriginalFile, fileName); err != nil {
