@@ -872,6 +872,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/zip-logs") && method == "GET":
 		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/zip-logs")
 		return handleGetZipLogs(projectID, headers)
+	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/zips") && method == "DELETE":
+		// Delete all zips: /api/projects/{projectId}/zips
+		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/zips")
+		return handleDeleteAllZips(projectID, headers)
 	case strings.HasPrefix(path, "/api/projects/") && strings.Contains(path, "/zips/") && method == "DELETE":
 		// Extract projectID and zipKey from path: /api/projects/{projectId}/zips/{zipKey}
 		parts := strings.Split(path, "/")
@@ -885,6 +889,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 			return handleDeleteZip(projectID, zipKey, headers)
 		}
 		return errorResponse(400, "Invalid zip delete path", headers)
+	case strings.HasPrefix(path, "/api/projects/") && !strings.Contains(path[len("/api/projects/"):], "/") && method == "DELETE":
+		// Delete project: /api/projects/{projectId}
+		projectID := strings.TrimPrefix(path, "/api/projects/")
+		return handleDeleteProject(projectID, headers)
 	default:
 		return errorResponse(404, "Not found", headers)
 	}
@@ -2079,6 +2087,136 @@ func handleDeleteZip(projectID string, zipKey string, headers map[string]string)
 	body, _ := json.Marshal(map[string]interface{}{
 		"success": true,
 		"message": "Zip file deleted",
+	})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleDeleteAllZips(projectID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Get project to find all zips
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	// Delete all zip files from S3
+	for _, zf := range project.ZipFiles {
+		_, err = s3Client.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(zf.Key),
+		})
+		if err != nil {
+			fmt.Printf("Warning: Failed to delete zip %s from S3: %v\n", zf.Key, err)
+		}
+	}
+
+	// Remove ZipFiles attribute from project
+	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+		UpdateExpression: aws.String("REMOVE ZipFiles"),
+	})
+
+	if err != nil {
+		return errorResponse(500, "Failed to update project", headers)
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"message": "All zip files deleted",
+	})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handleDeleteProject(projectID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Get project to find all associated data
+	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+	if err != nil || projResult.Item == nil {
+		return errorResponse(404, "Project not found", headers)
+	}
+
+	var project Project
+	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
+
+	// Delete all zip files from S3
+	for _, zf := range project.ZipFiles {
+		_, err = s3Client.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(zf.Key),
+		})
+		if err != nil {
+			fmt.Printf("Warning: Failed to delete zip %s from S3: %v\n", zf.Key, err)
+		}
+	}
+
+	// Update all images in this project to remove project association
+	// Query images with this projectId
+	queryInput := &dynamodb.QueryInput{
+		TableName:              aws.String(imageTable),
+		IndexName:              aws.String("ProjectIndex"),
+		KeyConditionExpression: aws.String("ProjectID = :pid"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":pid": {S: aws.String(projectID)},
+		},
+	}
+
+	queryResult, err := ddbClient.Query(queryInput)
+	if err == nil {
+		for _, item := range queryResult.Items {
+			imageGUID := item["ImageGUID"].S
+			if imageGUID != nil {
+				// Remove project association from image
+				_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+					TableName: aws.String(imageTable),
+					Key: map[string]*dynamodb.AttributeValue{
+						"ImageGUID": {S: imageGUID},
+					},
+					UpdateExpression: aws.String("REMOVE ProjectID"),
+				})
+				if err != nil {
+					fmt.Printf("Warning: Failed to update image %s: %v\n", *imageGUID, err)
+				}
+			}
+		}
+	}
+
+	// Delete the project record
+	_, err = ddbClient.DeleteItem(&dynamodb.DeleteItemInput{
+		TableName: aws.String(projectsTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ProjectID": {S: aws.String(projectID)},
+		},
+	})
+
+	if err != nil {
+		return errorResponse(500, "Failed to delete project", headers)
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"success": true,
+		"message": "Project deleted",
 	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
