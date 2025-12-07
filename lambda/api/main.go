@@ -1027,8 +1027,8 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		return errorResponse(500, "Failed to list images", headers)
 	}
 
-	// Initialize as empty slice to ensure JSON returns [] instead of null
-	images := make([]ImageResponse, 0)
+	// Use a map to deduplicate by OriginalFile, keeping the most recent entry
+	seenFiles := make(map[string]ImageResponse)
 	for _, item := range result.Items {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
@@ -1055,6 +1055,28 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 			}
 		}
 
+		// Deduplicate by OriginalFile - keep the most recently updated entry
+		if existing, found := seenFiles[img.OriginalFile]; found {
+			// Compare timestamps - keep the newer one
+			existingTime, _ := time.Parse(time.RFC3339, existing.UpdatedDateTime)
+			if existing.UpdatedDateTime == "" {
+				existingTime, _ = time.Parse(time.RFC3339, existing.InsertedDateTime)
+			}
+			newTime, _ := time.Parse(time.RFC3339, img.UpdatedDateTime)
+			if img.UpdatedDateTime == "" {
+				newTime, _ = time.Parse(time.RFC3339, img.InsertedDateTime)
+			}
+			if newTime.After(existingTime) {
+				seenFiles[img.OriginalFile] = img
+			}
+		} else {
+			seenFiles[img.OriginalFile] = img
+		}
+	}
+
+	// Convert map to slice
+	images := make([]ImageResponse, 0, len(seenFiles))
+	for _, img := range seenFiles {
 		images = append(images, img)
 	}
 
