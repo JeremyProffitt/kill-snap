@@ -703,3 +703,31 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Add to Project section styling */
+.add-to-project-section {
+  margin-top: 0.5rem;
+}
+
+/* Projects header with inline Add button */
+.projects-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.add-project-inline-btn {
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: #2ecc71;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.add-project-inline-btn:hover {
+  background: #27ae60;
+}

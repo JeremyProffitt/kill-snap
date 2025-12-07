@@ -536,10 +536,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 </div>
               </div>
 
-              <div className="sidebar-divider"></div>
-
-              <div className="sidebar-section">
-                <label className="sidebar-label">Projects</label>
+              {/* Add to Project section - below color buttons */}
+              <div className="sidebar-section add-to-project-section">
                 <select
                   value={targetProject}
                   onChange={(e) => setTargetProject(e.target.value)}
@@ -559,6 +557,21 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 >
                   {addingToProject ? 'Adding...' : 'Add to Project'}
                 </button>
+              </div>
+
+              <div className="sidebar-divider"></div>
+
+              <div className="sidebar-section">
+                <div className="projects-header">
+                  <label className="sidebar-label">Projects</label>
+                  <button
+                    onClick={() => setShowAddProjectDialog(true)}
+                    className="add-project-inline-btn"
+                    title="Add new project"
+                  >
+                    + Add
+                  </button>
+                </div>
               </div>
 
               <button
