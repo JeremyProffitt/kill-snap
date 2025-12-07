@@ -402,6 +402,36 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/projects/{projectId}/zip-logs
             Method: GET
+        UpdateProject:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}
+            Method: PUT
+        DeleteProject:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}
+            Method: DELETE
+        DeleteZip:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/zips/{zipKey}
+            Method: DELETE
+        DeleteAllZips:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/projects/{projectId}/zips
+            Method: DELETE
+        UndeleteImage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/images/{imageId}/undelete
+            Method: POST
         RegenerateAI:
           Type: Api
           Properties:
