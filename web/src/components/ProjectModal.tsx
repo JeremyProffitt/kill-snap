@@ -233,6 +233,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       await onProjectCreated();
     } catch (err: any) {
       console.error('Failed to delete zip:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to delete zip';
+      alert(`Error: ${errorMsg}`);
     } finally {
       setDeletingZip(null);
     }
@@ -245,6 +247,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       await onProjectCreated();
     } catch (err: any) {
       console.error('Failed to delete all zips:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to delete all zips';
+      alert(`Error: ${errorMsg}`);
     } finally {
       setDeletingAllZips(false);
     }
@@ -260,6 +264,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       await onProjectCreated();
     } catch (err: any) {
       console.error('Failed to delete project:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to delete project';
+      alert(`Error: ${errorMsg}`);
     } finally {
       setDeletingProject(false);
     }
