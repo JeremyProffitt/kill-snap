@@ -39,7 +39,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [imageFilter, setImageFilter] = useState<'all' | number>('all');
   const [loading, setLoading] = useState(false);
-  const [downloadingProject, setDownloadingProject] = useState<string | null>(null);
   const [generatingZip, setGeneratingZip] = useState<string | null>(null);
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [deletingZip, setDeletingZip] = useState<string | null>(null);
@@ -202,33 +201,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }));
   };
 
-  const handleDownloadCatalog = async (project: Project) => {
-    setDownloadingProject(project.projectId);
-    setResult(null);
-    try {
-      const response = await api.getProjectCatalog(project.projectId);
-      // Trigger download by opening the presigned URL
-      const link = document.createElement('a');
-      link.href = response.url;
-      link.download = response.filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setResult({
-        success: true,
-        message: `Downloading Lightroom catalog for "${project.name}"`
-      });
-    } catch (err: any) {
-      console.error('Failed to download catalog:', err);
-      const errorMsg = err.response?.status === 404
-        ? 'No catalog found for this project'
-        : 'Failed to download catalog';
-      setResult({ success: false, message: errorMsg });
-    } finally {
-      setDownloadingProject(null);
-    }
-  };
-
   const handleGenerateZip = async (project: Project) => {
     // Clear any previous errors for this project
     setZipErrors(prev => {
@@ -321,14 +293,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           </span>
         </div>
         <div className="project-actions">
-          <button
-            className="download-catalog-btn"
-            onClick={() => handleDownloadCatalog(project)}
-            disabled={downloadingProject === project.projectId || project.imageCount === 0}
-            title={project.imageCount === 0 ? 'No images in project' : 'Download Lightroom Classic Catalog'}
-          >
-            {downloadingProject === project.projectId ? 'Downloading...' : 'Download Lightroom Classic Catalog'}
-          </button>
           <div className="zip-action-container">
             <button
               className={`generate-zip-btn ${hasFailed || projectErrors ? 'failed' : ''}`}
@@ -356,25 +320,29 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               return (
                 <div key={zipFile.key} className="zip-file-item">
                   <span className="zip-file-info">
-                    {filename} ({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
+                    <a
+                      href="#"
+                      className="zip-file-link"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (downloadingZip !== zipId && deletingZip !== zipId) {
+                          handleDownloadZip(project, zipFile);
+                        }
+                      }}
+                      style={{ pointerEvents: downloadingZip === zipId || deletingZip === zipId ? 'none' : 'auto' }}
+                    >
+                      {downloadingZip === zipId ? 'Downloading...' : filename}
+                    </a>
+                    {' '}({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
                   </span>
-                  <div className="zip-file-actions">
-                    <button
-                      className="download-zip-btn"
-                      onClick={() => handleDownloadZip(project, zipFile)}
-                      disabled={downloadingZip === zipId || deletingZip === zipId}
-                    >
-                      {downloadingZip === zipId ? 'Downloading...' : 'Download'}
-                    </button>
-                    <button
-                      className="delete-zip-btn"
-                      onClick={() => handleDeleteZip(project, zipFile)}
-                      disabled={downloadingZip === zipId || deletingZip === zipId}
-                      title="Delete zip file"
-                    >
-                      {deletingZip === zipId ? 'Deleting...' : 'Delete'}
-                    </button>
-                  </div>
+                  <button
+                    className="delete-zip-btn"
+                    onClick={() => handleDeleteZip(project, zipFile)}
+                    disabled={downloadingZip === zipId || deletingZip === zipId}
+                    title="Delete zip file"
+                  >
+                    {deletingZip === zipId ? 'Deleting...' : 'Delete'}
+                  </button>
                 </div>
               );
             })}

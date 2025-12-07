@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	lrcat "github.com/JeremyProffitt/lrcat-go"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
@@ -116,15 +115,13 @@ type UpdateImageRequest struct {
 }
 
 type Project struct {
-	ProjectID        string    `json:"projectId" dynamodbav:"ProjectID"`
-	Name             string    `json:"name" dynamodbav:"Name"`
-	S3Prefix         string    `json:"s3Prefix,omitempty" dynamodbav:"S3Prefix,omitempty"`
-	CreatedAt        string    `json:"createdAt" dynamodbav:"CreatedAt"`
-	ImageCount       int       `json:"imageCount" dynamodbav:"ImageCount"`
-	CatalogPath      string    `json:"catalogPath,omitempty" dynamodbav:"CatalogPath,omitempty"`
-	CatalogUpdatedAt string    `json:"catalogUpdatedAt,omitempty" dynamodbav:"CatalogUpdatedAt,omitempty"`
-	Keywords         []string  `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
-	ZipFiles         []ZipFile `json:"zipFiles,omitempty" dynamodbav:"ZipFiles,omitempty"`
+	ProjectID  string    `json:"projectId" dynamodbav:"ProjectID"`
+	Name       string    `json:"name" dynamodbav:"Name"`
+	S3Prefix   string    `json:"s3Prefix,omitempty" dynamodbav:"S3Prefix,omitempty"`
+	CreatedAt  string    `json:"createdAt" dynamodbav:"CreatedAt"`
+	ImageCount int       `json:"imageCount" dynamodbav:"ImageCount"`
+	Keywords   []string  `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
+	ZipFiles   []ZipFile `json:"zipFiles,omitempty" dynamodbav:"ZipFiles,omitempty"`
 }
 
 // ZipFile represents a generated zip file for a project
@@ -780,205 +777,6 @@ func getColorName(groupNumber int) string {
 	return "none"
 }
 
-// getLightroomColorLabel maps our group numbers to Lightroom color labels
-func getLightroomColorLabel(groupNumber int) string {
-	// Lightroom color labels: Red, Yellow, Green, Blue, Purple
-	labels := map[int]string{
-		1: "Red",
-		2: "Yellow",
-		3: "Green",
-		4: "Blue",
-		5: "Purple",
-	}
-	if label, ok := labels[groupNumber]; ok {
-		return label
-	}
-	return "" // No color label
-}
-
-// generateProjectCatalog creates or updates a Lightroom catalog for a project
-func generateProjectCatalog(project Project, images []ImageResponse) error {
-	// Create catalog file in /tmp
-	catalogPath := fmt.Sprintf("/tmp/%s.lrcat", project.ProjectID)
-
-	// Remove existing catalog if present
-	os.Remove(catalogPath)
-
-	// Create new catalog
-	catalog, err := lrcat.NewCatalog(catalogPath)
-	if err != nil {
-		return fmt.Errorf("failed to create catalog: %v", err)
-	}
-	defer catalog.Close()
-
-	// Track root folders and subfolders we've created
-	rootFolders := make(map[string]int64) // path -> ID
-
-	// Process each image
-	for _, img := range images {
-		// Get the directory path from the original file
-		dirPath := filepath.Dir(img.OriginalFile)
-		fileName := filepath.Base(img.OriginalFile)
-
-		// Determine root folder (first path component after projects/<name>/)
-		// e.g., "projects/MyProject/2024/01/15/image.jpg" -> root="/projects/MyProject", subfolder="2024/01/15"
-		parts := strings.Split(dirPath, "/")
-		var rootPath, subPath string
-
-		if len(parts) >= 2 && parts[0] == "projects" {
-			// Root is "projects/<name>"
-			rootPath = "/" + parts[0] + "/" + parts[1]
-			if len(parts) > 2 {
-				subPath = strings.Join(parts[2:], "/")
-			}
-		} else {
-			// Fallback: use full directory as root
-			rootPath = "/" + dirPath
-			subPath = ""
-		}
-
-		// Get or create root folder
-		rootID, exists := rootFolders[rootPath]
-		if !exists {
-			rootFolder, err := catalog.AddRootFolder(rootPath)
-			if err != nil {
-				fmt.Printf("Warning: failed to add root folder %s: %v\n", rootPath, err)
-				continue
-			}
-			rootID = rootFolder.ID
-			rootFolders[rootPath] = rootID
-		}
-
-		// Get or create subfolder
-		var folderID int64 = rootID
-		if subPath != "" {
-			folder, err := catalog.GetOrCreateFolder(rootID, subPath)
-			if err != nil {
-				fmt.Printf("Warning: failed to create subfolder %s: %v\n", subPath, err)
-			} else {
-				folderID = folder.ID
-			}
-		}
-		_ = folderID // folderID used by AddImage automatically via path
-
-		// Parse capture time from EXIF
-		captureTime := getImageDate(img)
-
-		// Build image input for lrcat
-		imageInput := &lrcat.ImageInput{
-			FilePath:    "/" + img.OriginalFile, // Make absolute path
-			CaptureTime: captureTime,
-			FileFormat:  detectFileFormat(fileName),
-			ColorLabel:  getLightroomColorLabel(img.GroupNumber),
-			Pick:        1, // All project images are "picked"
-		}
-
-		// Set dimensions if available
-		if img.Width > 0 {
-			w := img.Width
-			imageInput.Width = &w
-		}
-		if img.Height > 0 {
-			h := img.Height
-			imageInput.Height = &h
-		}
-
-		// Add rating from image (1-5 stars)
-		if img.Rating > 0 && img.Rating <= 5 {
-			rating := img.Rating
-			imageInput.Rating = &rating
-		}
-
-		// Add image to catalog
-		catalogImage, err := catalog.AddImage(imageInput)
-		if err != nil {
-			fmt.Printf("Warning: failed to add image %s: %v\n", fileName, err)
-			continue
-		}
-
-		// Add keywords to the image
-		if len(img.Keywords) > 0 {
-			for _, keyword := range img.Keywords {
-				kw, err := catalog.GetOrCreateKeyword(keyword, nil)
-				if err != nil {
-					fmt.Printf("Warning: failed to create keyword %s: %v\n", keyword, err)
-					continue
-				}
-				if err := catalog.AddKeywordToImage(catalogImage.ID, kw.ID); err != nil {
-					fmt.Printf("Warning: failed to add keyword %s to image: %v\n", keyword, err)
-				}
-			}
-		}
-	}
-
-	// Close catalog before uploading
-	catalog.Close()
-
-	// Upload catalog to S3
-	catalogFile, err := os.Open(catalogPath)
-	if err != nil {
-		return fmt.Errorf("failed to open catalog for upload: %v", err)
-	}
-	defer catalogFile.Close()
-
-	// Read file content
-	catalogData, err := io.ReadAll(catalogFile)
-	if err != nil {
-		return fmt.Errorf("failed to read catalog: %v", err)
-	}
-
-	// Upload to S3 at projects/<s3Prefix>/project.lrcat (use sanitized name)
-	s3Prefix := getProjectS3Prefix(project)
-	s3Key := fmt.Sprintf("projects/%s/project.lrcat", s3Prefix)
-	_, err = s3Client.PutObject(&s3.PutObjectInput{
-		Bucket:      aws.String(bucketName),
-		Key:         aws.String(s3Key),
-		Body:        bytes.NewReader(catalogData),
-		ContentType: aws.String("application/octet-stream"),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to upload catalog to S3: %v", err)
-	}
-
-	// Update project record with catalog path
-	ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
-		TableName: aws.String(projectsTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ProjectID": {S: aws.String(project.ProjectID)},
-		},
-		UpdateExpression: aws.String("SET CatalogPath = :path, CatalogUpdatedAt = :updated"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":path":    {S: aws.String(s3Key)},
-			":updated": {S: aws.String(time.Now().Format(time.RFC3339))},
-		},
-	})
-
-	// Clean up temp file
-	os.Remove(catalogPath)
-
-	fmt.Printf("Generated catalog for project %s with %d images at %s\n", project.Name, len(images), s3Key)
-	return nil
-}
-
-// detectFileFormat returns the file format for lrcat based on extension
-func detectFileFormat(filename string) string {
-	ext := strings.ToLower(filepath.Ext(filename))
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "JPG"
-	case ".png":
-		return "PNG"
-	case ".tif", ".tiff":
-		return "TIFF"
-	case ".raw", ".cr2", ".cr3", ".nef", ".arw", ".dng":
-		return "RAW"
-	case ".heic", ".heif":
-		return "HEIC"
-	default:
-		return "JPG"
-	}
-}
-
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	headers := map[string]string{
 		"Content-Type":                "application/json",
@@ -1054,9 +852,6 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/images") && method == "GET":
 		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/images")
 		return handleGetProjectImages(projectID, headers)
-	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/catalog") && method == "GET":
-		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/catalog")
-		return handleGetProjectCatalog(projectID, headers)
 	case strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/generate-zip") && method == "POST":
 		projectID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/projects/"), "/generate-zip")
 		return handleGenerateZip(projectID, headers)
@@ -1721,15 +1516,6 @@ func handleCreateProject(request events.APIGatewayProxyRequest, headers map[stri
 		return errorResponse(500, "Failed to create project", headers)
 	}
 
-	// Generate initial empty Lightroom catalog
-	if err := generateProjectCatalog(project, []ImageResponse{}); err != nil {
-		fmt.Printf("Warning: failed to generate initial catalog: %v\n", err)
-		// Don't fail project creation if catalog generation fails
-	} else {
-		project.CatalogPath = fmt.Sprintf("projects/%s/project.lrcat", s3Prefix)
-		project.CatalogUpdatedAt = time.Now().Format(time.RFC3339)
-	}
-
 	body, _ := json.Marshal(project)
 	return events.APIGatewayProxyResponse{
 		StatusCode: 201,
@@ -1938,34 +1724,6 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		},
 	})
 
-	// Regenerate Lightroom catalog with all project images
-	if movedCount > 0 {
-		// Query all images in this project for catalog generation
-		projectImagesResult, err := ddbClient.Query(&dynamodb.QueryInput{
-			TableName:              aws.String(imageTable),
-			IndexName:              aws.String("ProjectIndex"),
-			KeyConditionExpression: aws.String("ProjectID = :pid"),
-			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":pid": {S: aws.String(projectID)},
-			},
-		})
-		if err == nil {
-			var allProjectImages []ImageResponse
-			for _, item := range projectImagesResult.Items {
-				var img ImageResponse
-				dynamodbattribute.UnmarshalMap(item, &img)
-				allProjectImages = append(allProjectImages, img)
-			}
-
-			// Update project image count for catalog generation
-			project.ImageCount += movedCount
-
-			if err := generateProjectCatalog(project, allProjectImages); err != nil {
-				fmt.Printf("Warning: failed to regenerate catalog: %v\n", err)
-			}
-		}
-	}
-
 	body, _ := json.Marshal(map[string]int{"movedCount": movedCount})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
@@ -1996,49 +1754,6 @@ func handleGetProjectImages(projectID string, headers map[string]string) (events
 	}
 
 	body, _ := json.Marshal(images)
-	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
-		Headers:    headers,
-		Body:       string(body),
-	}, nil
-}
-
-func handleGetProjectCatalog(projectID string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
-	// Get project to get catalog path
-	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String(projectsTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ProjectID": {S: aws.String(projectID)},
-		},
-	})
-	if err != nil || projResult.Item == nil {
-		return errorResponse(404, "Project not found", headers)
-	}
-
-	var project Project
-	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
-
-	if project.CatalogPath == "" {
-		return errorResponse(404, "Catalog not found for this project", headers)
-	}
-
-	// Generate presigned URL for catalog download
-	req, _ := s3Client.GetObjectRequest(&s3.GetObjectInput{
-		Bucket:                     aws.String(bucketName),
-		Key:                        aws.String(project.CatalogPath),
-		ResponseContentDisposition: aws.String(fmt.Sprintf("attachment; filename=\"%s.lrcat\"", project.Name)),
-	})
-
-	url, err := req.Presign(15 * time.Minute)
-	if err != nil {
-		return errorResponse(500, "Failed to generate download URL", headers)
-	}
-
-	body, _ := json.Marshal(map[string]string{
-		"url":       url,
-		"filename":  project.Name + ".lrcat",
-		"updatedAt": project.CatalogUpdatedAt,
-	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers:    headers,

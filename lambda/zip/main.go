@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	jpegstructure "github.com/dsoprea/go-jpeg-image-structure/v2"
 )
 
 const (
@@ -40,14 +42,12 @@ type ZipRequest struct {
 
 // Project represents a project record in DynamoDB
 type Project struct {
-	ProjectID        string    `json:"projectId" dynamodbav:"ProjectID"`
-	Name             string    `json:"name" dynamodbav:"Name"`
-	S3Prefix         string    `json:"s3Prefix,omitempty" dynamodbav:"S3Prefix,omitempty"`
-	CreatedAt        string    `json:"createdAt" dynamodbav:"CreatedAt"`
-	ImageCount       int       `json:"imageCount" dynamodbav:"ImageCount"`
-	CatalogPath      string    `json:"catalogPath,omitempty" dynamodbav:"CatalogPath,omitempty"`
-	CatalogUpdatedAt string    `json:"catalogUpdatedAt,omitempty" dynamodbav:"CatalogUpdatedAt,omitempty"`
-	ZipFiles         []ZipFile `json:"zipFiles,omitempty" dynamodbav:"ZipFiles,omitempty"`
+	ProjectID  string    `json:"projectId" dynamodbav:"ProjectID"`
+	Name       string    `json:"name" dynamodbav:"Name"`
+	S3Prefix   string    `json:"s3Prefix,omitempty" dynamodbav:"S3Prefix,omitempty"`
+	CreatedAt  string    `json:"createdAt" dynamodbav:"CreatedAt"`
+	ImageCount int       `json:"imageCount" dynamodbav:"ImageCount"`
+	ZipFiles   []ZipFile `json:"zipFiles,omitempty" dynamodbav:"ZipFiles,omitempty"`
 }
 
 // ZipFile represents a generated zip file
@@ -66,6 +66,11 @@ type ImageRecord struct {
 	FileSize     int64    `json:"fileSize" dynamodbav:"FileSize"`
 	ProjectID    string   `json:"projectId,omitempty" dynamodbav:"ProjectID,omitempty"`
 	RelatedFiles []string `json:"relatedFiles,omitempty" dynamodbav:"RelatedFiles,omitempty"`
+	// Metadata fields for XMP/EXIF
+	Keywords    []string `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
+	Description string   `json:"description,omitempty" dynamodbav:"Description,omitempty"`
+	Rating      int      `json:"rating,omitempty" dynamodbav:"Rating,omitempty"`
+	GroupNumber int      `json:"groupNumber,omitempty" dynamodbav:"GroupNumber,omitempty"`
 }
 
 func init() {
@@ -160,8 +165,8 @@ func handleRequest(ctx context.Context, request ZipRequest) error {
 			zipKey = fmt.Sprintf("projects/%s/%s_%s_part%d.zip", s3Prefix, sanitizedName, dateStr, i+1)
 		}
 
-		// Create zip file (include lrcat catalog if available)
-		zipInfo, err := createAndUploadZip(ctx, batch, zipKey, project.CatalogPath)
+		// Create zip file with XMP sidecars for RAW files and EXIF updates for JPGs
+		zipInfo, err := createAndUploadZip(ctx, batch, zipKey, project.Name)
 		if err != nil {
 			fmt.Printf("Error creating zip %s: %v\n", zipKey, err)
 			// Record failed zip
@@ -290,10 +295,166 @@ func sanitizeZipName(name string) string {
 	return result
 }
 
-func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string, catalogPath string) (*ZipFile, error) {
+// getColorLabel maps group numbers to color label names for XMP
+func getColorLabel(groupNumber int) string {
+	labels := map[int]string{
+		1: "Red",
+		2: "Yellow",
+		3: "Green",
+		4: "Blue",
+		5: "Purple",
+	}
+	if label, ok := labels[groupNumber]; ok {
+		return label
+	}
+	return ""
+}
+
+// generateXMPContent creates XMP sidecar content for a RAW file
+func generateXMPContent(img ImageRecord, projectName string) string {
+	// Build keywords string
+	keywordsXML := ""
+	if len(img.Keywords) > 0 {
+		keywordsXML = "   <dc:subject>\n    <rdf:Bag>\n"
+		for _, kw := range img.Keywords {
+			keywordsXML += fmt.Sprintf("     <rdf:li>%s</rdf:li>\n", escapeXML(kw))
+		}
+		keywordsXML += "    </rdf:Bag>\n   </dc:subject>\n"
+	}
+
+	// Build description
+	descriptionXML := ""
+	if img.Description != "" {
+		descriptionXML = fmt.Sprintf("   <dc:description>\n    <rdf:Alt>\n     <rdf:li xml:lang=\"x-default\">%s</rdf:li>\n    </rdf:Alt>\n   </dc:description>\n", escapeXML(img.Description))
+	}
+
+	// Get color label
+	colorLabel := getColorLabel(img.GroupNumber)
+	labelXML := ""
+	if colorLabel != "" {
+		labelXML = fmt.Sprintf("   xmp:Label=\"%s\"\n", colorLabel)
+	}
+
+	// Rating (1-5 stars)
+	ratingXML := ""
+	if img.Rating > 0 && img.Rating <= 5 {
+		ratingXML = fmt.Sprintf("   xmp:Rating=\"%d\"\n", img.Rating)
+	}
+
+	xmp := fmt.Sprintf(`<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="XMP Core 5.6.0">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+%s%s>
+   <dc:title>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">%s</rdf:li>
+    </rdf:Alt>
+   </dc:title>
+%s%s  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`, labelXML, ratingXML, escapeXML(projectName), keywordsXML, descriptionXML)
+
+	return xmp
+}
+
+// escapeXML escapes special XML characters
+func escapeXML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
+}
+
+// isRAWFile checks if a file extension is a RAW format
+func isRAWFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	rawExtensions := map[string]bool{
+		".cr2": true, ".cr3": true, ".nef": true, ".arw": true, ".raf": true,
+		".orf": true, ".dng": true, ".rw2": true, ".pef": true, ".srw": true,
+		".3fr": true, ".raw": true, ".rwl": true, ".mrw": true, ".nrw": true,
+		".kdc": true, ".dcr": true, ".sr2": true, ".erf": true, ".mef": true,
+		".mos": true,
+	}
+	return rawExtensions[ext]
+}
+
+// isJPGFile checks if a file extension is a JPG format
+func isJPGFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".jpg" || ext == ".jpeg"
+}
+
+// embedXMPInJPEG embeds XMP metadata into a JPEG file's APP1 segment
+func embedXMPInJPEG(jpegData []byte, xmpContent string) ([]byte, error) {
+	// Parse the JPEG structure
+	jmp := jpegstructure.NewJpegMediaParser()
+	intfc, err := jmp.ParseBytes(jpegData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JPEG: %v", err)
+	}
+
+	sl := intfc.(*jpegstructure.SegmentList)
+
+	// Create XMP data with Adobe namespace prefix (null-terminated)
+	xmpNamespace := "http://ns.adobe.com/xap/1.0/\x00"
+	xmpBytes := []byte(xmpNamespace + xmpContent)
+
+	// Create new XMP segment (APP1 marker = 0xE1)
+	xmpSegment := &jpegstructure.Segment{
+		MarkerId: 0xe1,
+		Data:     xmpBytes,
+	}
+
+	// Check if XMP already exists and find the insertion point
+	existingXmpIndex, _, _ := sl.FindXmp()
+
+	// Build new segment list
+	segments := sl.Segments()
+	var newSegments []*jpegstructure.Segment
+
+	insertDone := false
+	for i, seg := range segments {
+		// Skip existing XMP segment (we'll add our new one)
+		if i == existingXmpIndex && existingXmpIndex >= 0 {
+			continue
+		}
+
+		// Insert XMP after SOI (0xD8) and any APP0 (0xE0) but before other segments
+		if !insertDone && seg.MarkerId != 0xd8 && seg.MarkerId != 0xe0 {
+			newSegments = append(newSegments, xmpSegment)
+			insertDone = true
+		}
+
+		newSegments = append(newSegments, seg)
+	}
+
+	// If we haven't inserted yet (shouldn't happen), add at end
+	if !insertDone {
+		newSegments = append(newSegments, xmpSegment)
+	}
+
+	// Create new segment list and write
+	newSl := jpegstructure.NewSegmentList(newSegments)
+
+	var buf bytes.Buffer
+	err = newSl.Write(&buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write modified JPEG: %v", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string, projectName string) (*ZipFile, error) {
 	fmt.Printf("=== Creating zip: %s ===\n", zipKey)
 	fmt.Printf("Images to include: %d\n", len(images))
-	fmt.Printf("Catalog path: %s\n", catalogPath)
+	fmt.Printf("Project name: %s\n", projectName)
 
 	// Create a temporary file for the zip
 	tmpFile, err := os.CreateTemp("", "project-*.zip")
@@ -355,29 +516,77 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 		return nil
 	}
 
-	// Add lrcat catalog file first if available, renamed to match project name
-	if catalogPath != "" {
-		fmt.Printf("Adding catalog file to zip: %s\n", catalogPath)
-		// Extract project name from zipKey (format: projects/{s3Prefix}/{sanitizedName}_{date}.zip)
-		zipBase := filepath.Base(zipKey)
-		// Remove date suffix and .zip extension to get project name
-		catalogFileName := strings.TrimSuffix(zipBase, ".zip")
-		// Remove _partN suffix if present
-		if idx := strings.LastIndex(catalogFileName, "_part"); idx > 0 {
-			catalogFileName = catalogFileName[:idx]
+	// Helper function to add content directly to zip
+	addContentToZip := func(content []byte, zipFileName string) error {
+		header := &zip.FileHeader{
+			Name:   zipFileName,
+			Method: zip.Store,
 		}
-		// Remove date suffix (last underscore and date)
-		if idx := strings.LastIndex(catalogFileName, "_"); idx > 0 {
-			catalogFileName = catalogFileName[:idx]
+		header.SetModTime(time.Now())
+		header.UncompressedSize64 = uint64(len(content))
+
+		fmt.Printf("  Adding content to zip as: %s (size: %d bytes)\n", zipFileName, len(content))
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return fmt.Errorf("failed to create zip entry: %v", err)
 		}
-		catalogFileName = catalogFileName + ".lrcat"
-		fmt.Printf("  Renaming catalog to: %s\n", catalogFileName)
-		if err := addFileToZip(catalogPath, catalogFileName); err != nil {
-			fmt.Printf("  WARNING: Failed to add catalog to zip: %v\n", err)
+
+		_, err = writer.Write(content)
+		if err != nil {
+			return fmt.Errorf("failed to write content to zip: %v", err)
+		}
+		return nil
+	}
+
+	// Helper function to add a JPEG with embedded XMP metadata
+	addJPGWithEmbeddedXMP := func(s3Key string, zipFileName string, xmpContent string) error {
+		fmt.Printf("  Downloading JPEG from S3: bucket=%s, key=%s\n", bucketName, s3Key)
+		getResult, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(s3Key),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to download from S3: %v", err)
+		}
+		defer getResult.Body.Close()
+
+		// Read entire JPEG into memory
+		jpegData, err := io.ReadAll(getResult.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read JPEG data: %v", err)
+		}
+
+		// Embed XMP into JPEG
+		fmt.Printf("  Embedding XMP metadata into JPEG...\n")
+		modifiedJPEG, err := embedXMPInJPEG(jpegData, xmpContent)
+		if err != nil {
+			fmt.Printf("  WARNING: Failed to embed XMP, using original file: %v\n", err)
+			modifiedJPEG = jpegData // Fall back to original if embedding fails
 		} else {
-			fileNames[catalogFileName] = 1
-			successCount++
+			fmt.Printf("  XMP embedded successfully (original: %d bytes, with XMP: %d bytes)\n", len(jpegData), len(modifiedJPEG))
 		}
+
+		// Add modified JPEG to zip
+		header := &zip.FileHeader{
+			Name:   zipFileName,
+			Method: zip.Store,
+		}
+		header.SetModTime(time.Now())
+		header.UncompressedSize64 = uint64(len(modifiedJPEG))
+
+		fmt.Printf("  Adding to zip as: %s (Store mode, size: %d bytes)\n", zipFileName, len(modifiedJPEG))
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return fmt.Errorf("failed to create zip entry: %v", err)
+		}
+
+		_, err = writer.Write(modifiedJPEG)
+		if err != nil {
+			return fmt.Errorf("failed to write to zip: %v", err)
+		}
+
+		fmt.Printf("  SUCCESS: Written %d bytes with embedded XMP\n", len(modifiedJPEG))
+		return nil
 	}
 
 	for i, img := range images {
@@ -396,12 +605,44 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 			fileNames[baseName] = 1
 		}
 
-		if err := addFileToZip(img.OriginalFile, fileName); err != nil {
-			fmt.Printf("  ERROR: %v\n", err)
-			failCount++
-			continue
+		// Generate XMP content for this image
+		xmpContent := generateXMPContent(img, projectName)
+
+		// Handle JPEG files specially - embed XMP metadata directly into the file
+		if isJPGFile(fileName) {
+			if err := addJPGWithEmbeddedXMP(img.OriginalFile, fileName, xmpContent); err != nil {
+				fmt.Printf("  ERROR: %v\n", err)
+				failCount++
+				continue
+			}
+			successCount++
+
+			// Also add XMP sidecar for maximum compatibility
+			xmpFileName := strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".xmp"
+			if err := addContentToZip([]byte(xmpContent), xmpFileName); err != nil {
+				fmt.Printf("  WARNING: Failed to add XMP sidecar for %s: %v\n", fileName, err)
+			} else {
+				fmt.Printf("  Added XMP sidecar: %s\n", xmpFileName)
+			}
+		} else {
+			// For non-JPEG files, just add to zip directly
+			if err := addFileToZip(img.OriginalFile, fileName); err != nil {
+				fmt.Printf("  ERROR: %v\n", err)
+				failCount++
+				continue
+			}
+			successCount++
+
+			// Add XMP sidecar for RAW files
+			if isRAWFile(fileName) {
+				xmpFileName := strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".xmp"
+				if err := addContentToZip([]byte(xmpContent), xmpFileName); err != nil {
+					fmt.Printf("  WARNING: Failed to add XMP sidecar for %s: %v\n", fileName, err)
+				} else {
+					fmt.Printf("  Added XMP sidecar: %s\n", xmpFileName)
+				}
+			}
 		}
-		successCount++
 
 		// Add related files (RAW files) to the zip
 		for _, relFile := range img.RelatedFiles {
@@ -423,6 +664,17 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 				continue
 			}
 			successCount++
+
+			// Add XMP sidecar for RAW file
+			if isRAWFile(relFileName) {
+				xmpFileName := strings.TrimSuffix(relFileName, filepath.Ext(relFileName)) + ".xmp"
+				xmpContent := generateXMPContent(img, projectName)
+				if err := addContentToZip([]byte(xmpContent), xmpFileName); err != nil {
+					fmt.Printf("  WARNING: Failed to add XMP sidecar for RAW %s: %v\n", relFileName, err)
+				} else {
+					fmt.Printf("  Added XMP sidecar for RAW: %s\n", xmpFileName)
+				}
+			}
 		}
 	}
 

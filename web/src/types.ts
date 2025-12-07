@@ -45,8 +45,6 @@ export interface Project {
   s3Prefix?: string;
   createdAt: string;
   imageCount: number;
-  catalogPath?: string;
-  catalogUpdatedAt?: string;
   zipFiles?: ZipFile[];
 }
 
@@ -56,12 +54,6 @@ export interface ZipFile {
   imageCount: number;
   createdAt: string;
   status: 'generating' | 'complete' | 'failed';
-}
-
-export interface CatalogDownloadResponse {
-  url: string;
-  filename: string;
-  updatedAt: string;
 }
 
 export interface AddToProjectRequest {
