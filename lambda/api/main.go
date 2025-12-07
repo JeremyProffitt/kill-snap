@@ -1707,6 +1707,32 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 			}
 		}
 
+		// Generate AI keywords and description if not already present
+		var aiKeywords []string
+		var aiDescription string
+		if img.Description == "" && openaiAPIKey != "" {
+			fmt.Printf("Generating AI analysis for image %s (added to project)\n", img.ImageGUID)
+			aiResult, err := analyzeImageWithGPT4o(bucketName, newPaths["thumbnail400"])
+			if err != nil {
+				fmt.Printf("AI analysis failed for image %s: %v\n", img.ImageGUID, err)
+			} else {
+				// Merge AI keywords with existing user keywords (case-insensitive deduplication)
+				existingKeywordsLower := make(map[string]bool)
+				for _, kw := range img.Keywords {
+					existingKeywordsLower[strings.ToLower(kw)] = true
+				}
+				aiKeywords = append([]string{}, img.Keywords...)
+				for _, kw := range aiResult.Keywords {
+					if !existingKeywordsLower[strings.ToLower(kw)] {
+						aiKeywords = append(aiKeywords, kw)
+						existingKeywordsLower[strings.ToLower(kw)] = true
+					}
+				}
+				aiDescription = aiResult.Description
+				fmt.Printf("AI analysis complete for image %s: %d keywords\n", img.ImageGUID, len(aiKeywords))
+			}
+		}
+
 		// Update image record
 		updateExpr := "SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :status, ProjectID = :proj, UpdatedDateTime = :updated"
 		exprValues := map[string]*dynamodb.AttributeValue{
@@ -1724,16 +1750,37 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 			exprValues[":rawFiles"] = &dynamodb.AttributeValue{L: rawFilesList}
 		}
 
+		// Add AI-generated description if available
+		if aiDescription != "" {
+			updateExpr += ", #desc = :desc"
+			exprValues[":desc"] = &dynamodb.AttributeValue{S: aws.String(aiDescription)}
+		}
+
+		// Add merged keywords if available
+		if len(aiKeywords) > 0 {
+			keywordsList := make([]*dynamodb.AttributeValue, len(aiKeywords))
+			for i, kw := range aiKeywords {
+				keywordsList[i] = &dynamodb.AttributeValue{S: aws.String(kw)}
+			}
+			updateExpr += ", Keywords = :keywords"
+			exprValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
+		}
+
+		exprNames := map[string]*string{
+			"#status": aws.String("Status"),
+		}
+		if aiDescription != "" {
+			exprNames["#desc"] = aws.String("Description")
+		}
+
 		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
 			TableName: aws.String(imageTable),
 			Key: map[string]*dynamodb.AttributeValue{
 				"ImageGUID": {S: aws.String(img.ImageGUID)},
 			},
-			UpdateExpression: aws.String(updateExpr),
+			UpdateExpression:          aws.String(updateExpr),
 			ExpressionAttributeValues: exprValues,
-			ExpressionAttributeNames: map[string]*string{
-				"#status": aws.String("Status"),
-			},
+			ExpressionAttributeNames:  exprNames,
 		})
 		if err != nil {
 			fmt.Printf("Failed to update image record %s: %v\n", img.ImageGUID, err)

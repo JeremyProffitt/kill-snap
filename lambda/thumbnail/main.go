@@ -3,13 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,54 +41,11 @@ type ImageMetadata struct {
 	UpdatedDateTime  string            `json:"UpdatedDateTime"`
 }
 
-// OpenAI API types
-type OpenAIMessage struct {
-	Role    string        `json:"role"`
-	Content []interface{} `json:"content"`
-}
-
-type OpenAITextContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type OpenAIImageContent struct {
-	Type     string         `json:"type"`
-	ImageURL OpenAIImageURL `json:"image_url"`
-}
-
-type OpenAIImageURL struct {
-	URL    string `json:"url"`
-	Detail string `json:"detail"`
-}
-
-type OpenAIRequest struct {
-	Model     string          `json:"model"`
-	Messages  []OpenAIMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens"`
-}
-
-type OpenAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
-type AIAnalysisResult struct {
-	Keywords    []string `json:"keywords"`
-	Description string   `json:"description"`
-}
 
 var (
-	s3Client     *s3.S3
-	ddbClient    *dynamodb.DynamoDB
-	tableName    string
-	openaiAPIKey string
+	s3Client  *s3.S3
+	ddbClient *dynamodb.DynamoDB
+	tableName string
 )
 
 func init() {
@@ -100,7 +53,6 @@ func init() {
 	s3Client = s3.New(sess)
 	ddbClient = dynamodb.New(sess)
 	tableName = os.Getenv("DYNAMODB_TABLE")
-	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
 }
 
 func handler(ctx context.Context, s3Event events.S3Event) error {
@@ -198,19 +150,8 @@ func handler(ctx context.Context, s3Event events.S3Event) error {
 			UpdatedDateTime:  now,
 		}
 
-		// Generate AI keywords and description if OpenAI is configured
-		if openaiAPIKey != "" {
-			aiResult, err := analyzeImageWithAI(thumbnail400)
-			if err != nil {
-				fmt.Printf("Warning: AI analysis failed: %v\n", err)
-			} else {
-				metadata.Keywords = aiResult.Keywords
-				metadata.Description = aiResult.Description
-				fmt.Printf("AI analysis complete: %d keywords\n", len(aiResult.Keywords))
-			}
-		}
-
 		// Store in DynamoDB
+		// Note: AI keywords and description are generated later when the image is approved or added to a project
 		if err := storeMetadata(metadata); err != nil {
 			return fmt.Errorf("failed to store metadata: %v", err)
 		}
@@ -318,101 +259,6 @@ func storeMetadata(metadata ImageMetadata) error {
 		Item:      av,
 	})
 	return err
-}
-
-func analyzeImageWithAI(thumbnailData *bytes.Buffer) (*AIAnalysisResult, error) {
-	// Base64 encode the thumbnail
-	imageBase64 := base64.StdEncoding.EncodeToString(thumbnailData.Bytes())
-	dataURL := fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)
-
-	// Build OpenAI request
-	prompt := `Analyze this image and provide:
-1. A list of relevant keywords (5-15 keywords) that describe the subject, setting, mood, colors, and composition
-2. A brief description (1-2 sentences) of what the image shows
-
-Return your response as JSON in this exact format:
-{"keywords": ["keyword1", "keyword2", ...], "description": "Your description here"}`
-
-	openaiReq := OpenAIRequest{
-		Model: "gpt-4o",
-		Messages: []OpenAIMessage{
-			{
-				Role: "user",
-				Content: []interface{}{
-					OpenAITextContent{Type: "text", Text: prompt},
-					OpenAIImageContent{
-						Type: "image_url",
-						ImageURL: OpenAIImageURL{
-							URL:    dataURL,
-							Detail: "low",
-						},
-					},
-				},
-			},
-		},
-		MaxTokens: 500,
-	}
-
-	reqBody, err := json.Marshal(openaiReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %v", err)
-	}
-
-	// Make HTTP request to OpenAI
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+openaiAPIKey)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %v", err)
-	}
-
-	var openaiResp OpenAIResponse
-	if err := json.Unmarshal(body, &openaiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %v", err)
-	}
-
-	if openaiResp.Error != nil {
-		return nil, fmt.Errorf("OpenAI error: %s", openaiResp.Error.Message)
-	}
-
-	if len(openaiResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from OpenAI")
-	}
-
-	// Parse the JSON response from the model
-	content := openaiResp.Choices[0].Message.Content
-
-	// Try to extract JSON from the response (it might have markdown code blocks)
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, "```json") {
-		content = strings.TrimPrefix(content, "```json")
-		content = strings.TrimSuffix(content, "```")
-		content = strings.TrimSpace(content)
-	} else if strings.HasPrefix(content, "```") {
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-		content = strings.TrimSpace(content)
-	}
-
-	var result AIAnalysisResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse AI response JSON: %v (content: %s)", err, content)
-	}
-
-	return &result, nil
 }
 
 func main() {
