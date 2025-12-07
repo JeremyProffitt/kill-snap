@@ -40,6 +40,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [generatingZip, setGeneratingZip] = useState<string | null>(null);
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [deletingZip, setDeletingZip] = useState<string | null>(null);
+  const [deletingAllZips, setDeletingAllZips] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
   const [zipErrors, setZipErrors] = useState<{ [projectId: string]: string[] }>({});
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -236,6 +238,33 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
+  const handleDeleteAllZips = async (project: Project) => {
+    setDeletingAllZips(true);
+    try {
+      await api.deleteAllZips(project.projectId);
+      await onProjectCreated();
+    } catch (err: any) {
+      console.error('Failed to delete all zips:', err);
+    } finally {
+      setDeletingAllZips(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!selectedProject) return;
+
+    setDeletingProject(true);
+    try {
+      await api.deleteProject(selectedProject);
+      setSelectedProject('');
+      await onProjectCreated();
+    } catch (err: any) {
+      console.error('Failed to delete project:', err);
+    } finally {
+      setDeletingProject(false);
+    }
+  };
+
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -256,11 +285,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     const hasFailed = project.zipFiles?.some(z => z.status === 'failed');
     const completedZips = project.zipFiles?.filter(z => z.status === 'complete') || [];
     const projectErrors = zipErrors[project.projectId];
+    const hasZips = completedZips.length > 0;
 
     return (
       <div className="project-details">
+        <div className="project-details-divider"></div>
         <div className="project-actions">
-          <div className="zip-action-container">
+          <div className="zip-buttons-row">
             <button
               className={`generate-zip-btn ${hasFailed || projectErrors ? 'failed' : ''}`}
               onClick={() => handleGenerateZip(project)}
@@ -269,14 +300,22 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             >
               {generatingZip === project.projectId || isGenerating ? 'Generating...' : 'Generate ZIP'}
             </button>
-            {projectErrors && (
-              <div className="zip-error-messages">
-                {projectErrors.map((error, idx) => (
-                  <div key={idx} className="zip-error-message">{error}</div>
-                ))}
-              </div>
-            )}
+            <button
+              className="delete-all-zips-btn"
+              onClick={() => handleDeleteAllZips(project)}
+              disabled={deletingAllZips || !hasZips}
+              title={!hasZips ? 'No zip files to delete' : 'Delete all zip files'}
+            >
+              {deletingAllZips ? 'Deleting...' : 'Delete All Zips'}
+            </button>
           </div>
+          {projectErrors && (
+            <div className="zip-error-messages">
+              {projectErrors.map((error, idx) => (
+                <div key={idx} className="zip-error-message">{error}</div>
+              ))}
+            </div>
+          )}
         </div>
         {completedZips.length > 0 && (
           <div className="zip-files-list">
@@ -422,6 +461,18 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               </div>
 
               {currentProject && renderProjectDetails(currentProject)}
+
+              <div className="delete-project-section">
+                <div className="delete-project-divider"></div>
+                <button
+                  className="delete-project-btn"
+                  onClick={handleDeleteProject}
+                  disabled={deletingProject || !selectedProject}
+                  title="Delete this project and all its data"
+                >
+                  {deletingProject ? 'Deleting...' : 'Delete Project'}
+                </button>
+              </div>
             </>
           )}
         </div>

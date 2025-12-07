@@ -168,9 +168,12 @@
 /* Project details styles */
 .project-details {
   margin-top: 0.5rem;
-  padding: 0.5rem;
-  background: #16213e;
-  border-radius: 6px;
+}
+
+.project-details-divider {
+  height: 1px;
+  background: #2a3a5a;
+  margin-bottom: 0.5rem;
 }
 
 .project-info-row {
@@ -202,7 +205,13 @@
   gap: 0.5rem;
 }
 
+.zip-buttons-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .generate-zip-btn {
+  flex: 1;
   padding: 0.6rem 1rem;
   border: none;
   border-radius: 6px;
@@ -225,10 +234,32 @@
   cursor: not-allowed;
 }
 
+.delete-all-zips-btn {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #e74c3c;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.delete-all-zips-btn:hover:not(:disabled) {
+  background: #c0392b;
+  transform: translateY(-1px);
+}
+
+.delete-all-zips-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .zip-files-list {
   margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #2a3a5a;
 }
 
 .zip-files-label {
@@ -244,8 +275,6 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.35rem 10px 0.35rem 0.35rem;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
   margin-bottom: 0.25rem;
 }
 
@@ -539,6 +568,41 @@
 }
 
 .dialog-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Delete project section */
+.delete-project-section {
+  margin-top: 1rem;
+}
+
+.delete-project-divider {
+  height: 1px;
+  background: #2a3a5a;
+  margin-bottom: 0.5rem;
+}
+
+.delete-project-btn {
+  width: 100%;
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #c0392b;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.delete-project-btn:hover:not(:disabled) {
+  background: #a93226;
+  transform: translateY(-1px);
+}
+
+.delete-project-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

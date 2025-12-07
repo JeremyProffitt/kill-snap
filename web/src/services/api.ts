@@ -198,4 +198,18 @@ export const api = {
       { headers: authService.getAuthHeader() }
     );
   },
+
+  async deleteAllZips(projectId: string): Promise<void> {
+    await axios.delete(
+      `${API_BASE_URL}/api/projects/${projectId}/zips`,
+      { headers: authService.getAuthHeader() }
+    );
+  },
+
+  async deleteProject(projectId: string): Promise<void> {
+    await axios.delete(
+      `${API_BASE_URL}/api/projects/${projectId}`,
+      { headers: authService.getAuthHeader() }
+    );
+  },
 };
