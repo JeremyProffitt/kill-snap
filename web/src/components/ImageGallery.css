@@ -565,3 +565,141 @@
     font-size: 0.6rem;
   }
 }
+
+/* Sidebar project buttons (Create Zip + Add) */
+.sidebar-project-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.sidebar-project-buttons .sidebar-button {
+  flex: 1;
+  margin-top: 0;
+}
+
+/* Sidebar zip download list */
+.sidebar-zip-list {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-zip-link {
+  background: none;
+  border: none;
+  padding: 0.4rem 0;
+  font: inherit;
+  color: #3498db;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-zip-link:hover:not(:disabled) {
+  color: #5dade2;
+  text-decoration: underline;
+}
+
+.sidebar-zip-link:disabled {
+  color: #8892a6;
+  cursor: not-allowed;
+}
+
+/* Add Project Dialog (in ImageGallery) */
+.add-dialog-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1100;
+}
+
+.add-dialog {
+  background: #1a1a2e;
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.add-dialog h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.25rem;
+  color: #fff;
+  text-align: center;
+}
+
+.add-dialog input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #2a3a5a;
+  border-radius: 8px;
+  background: #16213e;
+  color: #fff;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.add-dialog input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+.add-dialog input::placeholder {
+  color: #6c7a8a;
+}
+
+.add-dialog-buttons {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.dialog-btn {
+  flex: 1;
+  padding: 0.75rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dialog-btn.cancel {
+  background: #2a3a5a;
+  color: #8892a6;
+}
+
+.dialog-btn.cancel:hover:not(:disabled) {
+  background: #3a4a6a;
+  color: #fff;
+}
+
+.dialog-btn.create {
+  background: #2ecc71;
+  color: white;
+}
+
+.dialog-btn.create:hover:not(:disabled) {
+  background: #27ae60;
+}
+
+.dialog-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

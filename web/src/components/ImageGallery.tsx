@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, ImageFilters } from '../services/api';
 import { authService } from '../services/auth';
-import { Image, Project } from '../types';
+import { Image, Project, ZipFile } from '../types';
 import { ImageModal } from './ImageModal';
 import { ProjectModal } from './ProjectModal';
 import { TransferBanner, TransferProgress } from './TransferBanner';
@@ -51,6 +51,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [targetProject, setTargetProject] = useState<string>('');
   const [addingToProject, setAddingToProject] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [generatingZip, setGeneratingZip] = useState(false);
+  const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
     isActive: false,
     currentFile: '',
@@ -301,8 +306,12 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   };
 
-  const handleProjectCreated = async () => {
+  const handleProjectCreated = async (newProjectId?: string) => {
     await loadProjects();
+    // If a new project was created, select it in the target dropdown
+    if (newProjectId) {
+      setTargetProject(newProjectId);
+    }
     loadImages();
   };
 
@@ -373,7 +382,66 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }));
   };
 
+  const handleCreateProjectInline = async () => {
+    if (!newProjectName.trim()) return;
+
+    setCreatingProject(true);
+    try {
+      const result = await api.createProject(newProjectName.trim());
+      setNewProjectName('');
+      setShowAddProjectDialog(false);
+      if (result?.projectId) {
+        setTargetProject(result.projectId);
+        await loadProjects();
+      }
+    } catch (err) {
+      console.error('Failed to create project:', err);
+      showNotification('Failed to create project', 'error');
+    } finally {
+      setCreatingProject(false);
+    }
+  };
+
+  const handleGenerateZip = async () => {
+    if (!selectedProject) return;
+
+    setGeneratingZip(true);
+    try {
+      await api.generateZip(selectedProject);
+      showNotification('Zip generation started', 'success');
+      await loadProjects();
+    } catch (err: any) {
+      console.error('Failed to generate zip:', err);
+      const errorMsg = err.response?.data?.error || 'Failed to start zip generation';
+      showNotification(errorMsg, 'error');
+    } finally {
+      setGeneratingZip(false);
+    }
+  };
+
+  const handleDownloadZip = async (project: Project, zipFile: ZipFile) => {
+    const zipId = `${project.projectId}-${zipFile.key}`;
+    setDownloadingZip(zipId);
+    try {
+      const response = await api.getZipDownload(project.projectId, zipFile.key);
+      const link = document.createElement('a');
+      link.href = response.url;
+      link.download = response.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Failed to download zip:', err);
+      showNotification('Failed to download zip file', 'error');
+    } finally {
+      setDownloadingZip(null);
+    }
+  };
+
   const selectedImage = selectedImageIndex !== null ? images[selectedImageIndex] : null;
+  const currentProject = projects.find(p => p.projectId === selectedProject);
+  const completedZips = currentProject?.zipFiles?.filter(z => z.status === 'complete') || [];
+  const isGeneratingZipForProject = currentProject?.zipFiles?.some(z => z.status === 'generating') || false;
 
   return (
     <div className="gallery-container">
@@ -502,13 +570,53 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
             </>
           )}
 
-          {selectedProject && (
-            <button
-              onClick={() => setShowProjectModal(true)}
-              className="sidebar-button secondary"
-            >
-              Manage
-            </button>
+          {selectedProject && currentProject && (
+            <>
+              <div className="sidebar-project-buttons">
+                <button
+                  onClick={handleGenerateZip}
+                  disabled={generatingZip || isGeneratingZipForProject || currentProject.imageCount === 0}
+                  className="sidebar-button primary"
+                  title={currentProject.imageCount === 0 ? 'No images in project' : 'Generate ZIP file'}
+                >
+                  {generatingZip || isGeneratingZipForProject ? 'Generating...' : 'Create Zip'}
+                </button>
+                <button
+                  onClick={() => setShowAddProjectDialog(true)}
+                  className="sidebar-button secondary"
+                >
+                  + Add
+                </button>
+              </div>
+
+              {completedZips.length > 0 && (
+                <div className="sidebar-zip-list">
+                  <label className="sidebar-label">Downloads</label>
+                  {completedZips.map((zipFile) => {
+                    const zipId = `${currentProject.projectId}-${zipFile.key}`;
+                    const filename = zipFile.key.split('/').pop() || 'download.zip';
+                    return (
+                      <button
+                        key={zipFile.key}
+                        type="button"
+                        className="sidebar-zip-link"
+                        onClick={() => handleDownloadZip(currentProject, zipFile)}
+                        disabled={downloadingZip === zipId}
+                      >
+                        {downloadingZip === zipId ? 'Downloading...' : filename}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowProjectModal(true)}
+                className="sidebar-button secondary"
+              >
+                Manage
+              </button>
+            </>
           )}
         </div>
 
@@ -682,6 +790,50 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           onProjectCreated={handleProjectCreated}
           existingProjects={projects}
         />
+      )}
+
+      {/* Inline Add Project Dialog */}
+      {showAddProjectDialog && (
+        <div className="add-dialog-backdrop" onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowAddProjectDialog(false);
+            setNewProjectName('');
+          }
+        }}>
+          <div className="add-dialog">
+            <h3>Create New Project</h3>
+            <input
+              type="text"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              placeholder="Enter project name..."
+              disabled={creatingProject}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateProjectInline()}
+              autoFocus
+            />
+            <div className="add-dialog-buttons">
+              <button
+                type="button"
+                className="dialog-btn cancel"
+                onClick={() => {
+                  setShowAddProjectDialog(false);
+                  setNewProjectName('');
+                }}
+                disabled={creatingProject}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="dialog-btn create"
+                onClick={handleCreateProjectInline}
+                disabled={creatingProject || !newProjectName.trim()}
+              >
+                {creatingProject ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

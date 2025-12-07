@@ -6,7 +6,7 @@ import './ProjectModal.css';
 
 interface ProjectModalProps {
   onClose: () => void;
-  onProjectCreated: () => void;
+  onProjectCreated: (newProjectId?: string) => void;
   existingProjects: Project[];
 }
 
@@ -34,16 +34,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   onProjectCreated,
   existingProjects,
 }) => {
-  const [mode, setMode] = useState<'existing' | 'create' | 'add'>('existing');
-  const [projectName, setProjectName] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [imageFilter, setImageFilter] = useState<'all' | number>('all');
   const [loading, setLoading] = useState(false);
   const [generatingZip, setGeneratingZip] = useState<string | null>(null);
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
   const [deletingZip, setDeletingZip] = useState<string | null>(null);
-  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [zipErrors, setZipErrors] = useState<{ [projectId: string]: string[] }>({});
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
     isActive: false,
     currentFile: '',
@@ -55,7 +55,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
   useEffect(() => {
     if (existingProjects.length > 0) {
-      // Only set selected project if none is selected, or if current selection is no longer valid
       setSelectedProject(prev => {
         if (!prev || !existingProjects.find(p => p.projectId === prev)) {
           return existingProjects[0].projectId;
@@ -65,7 +64,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   }, [existingProjects]);
 
-  // Check for zip generation timeout
   const checkZipStatus = useCallback(async (project: Project) => {
     const generatingZipFile = project.zipFiles?.find(z => z.status === 'generating');
     if (!generatingZipFile) return;
@@ -77,14 +75,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           ...prev,
           [project.projectId]: response.errorMessages || ['Zip generation failed']
         }));
-        onProjectCreated(); // Refresh projects to get updated status
+        onProjectCreated();
       }
     } catch (err) {
       console.error('Failed to check zip status:', err);
     }
   }, [onProjectCreated]);
 
-  // Periodically check for generating zips - refresh every 10 seconds to catch completion
   useEffect(() => {
     const projectsWithGeneratingZips = existingProjects.filter(
       p => p.zipFiles?.some(z => z.status === 'generating')
@@ -92,15 +89,12 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
     if (projectsWithGeneratingZips.length === 0) return;
 
-    // Check for timeout/errors immediately
     projectsWithGeneratingZips.forEach(checkZipStatus);
 
-    // Refresh projects every 10 seconds to check for completion
     const refreshInterval = setInterval(() => {
-      onProjectCreated(); // This refreshes the projects list
+      onProjectCreated();
     }, 10000);
 
-    // Check for errors every 30 seconds
     const errorCheckInterval = setInterval(() => {
       projectsWithGeneratingZips.forEach(checkZipStatus);
     }, 30000);
@@ -112,36 +106,33 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   }, [existingProjects, checkZipStatus, onProjectCreated]);
 
   const handleCreateProject = async () => {
-    if (!projectName.trim()) {
-      setResult({ success: false, message: 'Please enter a project name' });
-      return;
-    }
+    if (!newProjectName.trim()) return;
 
-    setLoading(true);
-    setResult(null);
+    setCreatingProject(true);
     try {
-      await api.createProject(projectName.trim());
-      setResult({ success: true, message: `Project "${projectName}" created successfully!` });
-      setProjectName('');
-      onProjectCreated();
+      const result = await api.createProject(newProjectName.trim());
+      setNewProjectName('');
+      setShowAddDialog(false);
+      // Select the newly created project
+      if (result?.projectId) {
+        setSelectedProject(result.projectId);
+        onProjectCreated(result.projectId);
+      } else {
+        onProjectCreated();
+      }
     } catch (err) {
       console.error('Failed to create project:', err);
-      setResult({ success: false, message: 'Failed to create project' });
     } finally {
-      setLoading(false);
+      setCreatingProject(false);
     }
   };
 
   const handleAddToProject = async () => {
-    if (!selectedProject) {
-      setResult({ success: false, message: 'Please select a project' });
-      return;
-    }
+    if (!selectedProject) return;
 
     const projectName = existingProjects.find(p => p.projectId === selectedProject)?.name || 'project';
 
     setLoading(true);
-    setResult(null);
     setTransferProgress({
       isActive: true,
       currentFile: '',
@@ -176,10 +167,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         status: 'complete',
       }));
 
-      setResult({
-        success: true,
-        message: `Moved ${response.movedCount} image(s) to "${projectName}"`
-      });
       onProjectCreated();
     } catch (err) {
       console.error('Failed to add images to project:', err);
@@ -188,7 +175,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         status: 'error',
         errorMessage: 'Failed to add images to project',
       }));
-      setResult({ success: false, message: 'Failed to add images to project' });
     } finally {
       setLoading(false);
     }
@@ -202,7 +188,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   };
 
   const handleGenerateZip = async (project: Project) => {
-    // Clear any previous errors for this project
     setZipErrors(prev => {
       const newErrors = { ...prev };
       delete newErrors[project.projectId];
@@ -210,18 +195,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     });
 
     setGeneratingZip(project.projectId);
-    setResult(null);
     try {
       await api.generateZip(project.projectId);
-      setResult({
-        success: true,
-        message: `Zip generation started for "${project.name}". This may take several minutes.`
-      });
-      onProjectCreated(); // Refresh projects to see updated status
+      onProjectCreated();
     } catch (err: any) {
       console.error('Failed to generate zip:', err);
-      const errorMsg = err.response?.data?.error || 'Failed to start zip generation';
-      setResult({ success: false, message: errorMsg });
     } finally {
       setGeneratingZip(null);
     }
@@ -230,7 +208,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const handleDownloadZip = async (project: Project, zipFile: ZipFile) => {
     const zipId = `${project.projectId}-${zipFile.key}`;
     setDownloadingZip(zipId);
-    setResult(null);
     try {
       const response = await api.getZipDownload(project.projectId, zipFile.key);
       const link = document.createElement('a');
@@ -239,13 +216,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      setResult({
-        success: true,
-        message: `Downloading ${response.filename}`
-      });
     } catch (err: any) {
       console.error('Failed to download zip:', err);
-      setResult({ success: false, message: 'Failed to download zip file' });
     } finally {
       setDownloadingZip(null);
     }
@@ -254,18 +226,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const handleDeleteZip = async (project: Project, zipFile: ZipFile) => {
     const zipId = `${project.projectId}-${zipFile.key}`;
     setDeletingZip(zipId);
-    setResult(null);
     try {
       await api.deleteZip(project.projectId, zipFile.key);
-      setResult({
-        success: true,
-        message: `Zip file deleted`
-      });
-      // Immediately refresh projects to update the UI
       await onProjectCreated();
     } catch (err: any) {
       console.error('Failed to delete zip:', err);
-      setResult({ success: false, message: 'Failed to delete zip file' });
     } finally {
       setDeletingZip(null);
     }
@@ -274,6 +239,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
+    }
+  };
+
+  const handleAddDialogBackdrop = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      setShowAddDialog(false);
+      setNewProjectName('');
     }
   };
 
@@ -288,10 +260,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     return (
       <div className="project-details">
         <div className="project-info-row">
-          <span className="project-count">{project.imageCount} images</span>
           <span className="project-date">
             Created: {new Date(project.createdAt).toLocaleDateString()}
           </span>
+          <span className="project-count">{project.imageCount} images</span>
         </div>
         <div className="project-actions">
           <div className="zip-action-container">
@@ -320,20 +292,20 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               const filename = zipFile.key.split('/').pop() || 'download.zip';
               return (
                 <div key={zipFile.key} className="zip-file-item">
-                  <span className="zip-file-info">
-                    <button
-                      type="button"
-                      className="zip-file-link"
-                      onClick={() => {
-                        if (downloadingZip !== zipId && deletingZip !== zipId) {
-                          handleDownloadZip(project, zipFile);
-                        }
-                      }}
-                      disabled={downloadingZip === zipId || deletingZip === zipId}
-                    >
-                      {downloadingZip === zipId ? 'Downloading...' : filename}
-                    </button>
-                    {' '}({formatFileSize(zipFile.size)}, {zipFile.imageCount} images)
+                  <button
+                    type="button"
+                    className="zip-file-link"
+                    onClick={() => {
+                      if (downloadingZip !== zipId && deletingZip !== zipId) {
+                        handleDownloadZip(project, zipFile);
+                      }
+                    }}
+                    disabled={downloadingZip === zipId || deletingZip === zipId}
+                  >
+                    {downloadingZip === zipId ? 'Downloading...' : filename}
+                  </button>
+                  <span className="zip-file-meta">
+                    {formatFileSize(zipFile.size)}, {zipFile.imageCount} images
                   </span>
                   <button
                     type="button"
@@ -363,136 +335,131 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 
         <h2>Project Management</h2>
 
-        <div className="project-tabs">
-          <button
-            className={`tab-btn ${mode === 'existing' ? 'active' : ''}`}
-            onClick={() => setMode('existing')}
-            disabled={loading || existingProjects.length === 0}
-          >
-            Existing Projects
-          </button>
-          <button
-            className={`tab-btn ${mode === 'create' ? 'active' : ''}`}
-            onClick={() => setMode('create')}
-            disabled={loading}
-          >
-            Create Project
-          </button>
-          <button
-            className={`tab-btn ${mode === 'add' ? 'active' : ''}`}
-            onClick={() => setMode('add')}
-            disabled={loading || existingProjects.length === 0}
-          >
-            Add to Project
-          </button>
-        </div>
-
-        {mode === 'existing' && (
-          <div className="project-form">
-            {existingProjects.length === 0 ? (
-              <p className="no-projects-message">No projects yet. Create one first!</p>
-            ) : (
-              <>
+        <div className="project-form">
+          {existingProjects.length === 0 ? (
+            <div className="no-projects-section">
+              <p className="no-projects-message">No projects yet.</p>
+              <button
+                className="project-btn primary"
+                onClick={() => setShowAddDialog(true)}
+              >
+                Create Project
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="project-select-row">
                 <label>Select Project:</label>
-                <select
-                  value={selectedProject}
-                  onChange={(e) => setSelectedProject(e.target.value)}
-                  disabled={loading}
-                  className="project-select"
-                >
-                  {existingProjects.map((project) => (
-                    <option key={project.projectId} value={project.projectId}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                {currentProject && renderProjectDetails(currentProject)}
-              </>
-            )}
-          </div>
-        )}
+                <div className="select-with-button">
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    disabled={loading}
+                    className="project-select"
+                  >
+                    {existingProjects.map((project) => (
+                      <option key={project.projectId} value={project.projectId}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="add-project-btn"
+                    onClick={() => setShowAddDialog(true)}
+                    disabled={loading}
+                    title="Add new project"
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
 
-        {mode === 'create' && (
-          <div className="project-form">
-            <label>Project Name:</label>
-            <input
-              type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="Enter project name..."
-              disabled={loading}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-            />
-            <button
-              className="project-btn primary"
-              onClick={handleCreateProject}
-              disabled={loading || !projectName.trim()}
-            >
-              {loading ? 'Creating...' : 'Create Project'}
-            </button>
-          </div>
-        )}
+              {currentProject && renderProjectDetails(currentProject)}
 
-        {mode === 'add' && (
-          <div className="project-form">
-            <label>Select Project:</label>
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              disabled={loading}
-            >
-              {existingProjects.map((project) => (
-                <option key={project.projectId} value={project.projectId}>
-                  {project.name} ({project.imageCount} images)
-                </option>
-              ))}
-            </select>
+              <div className="add-images-section">
+                <div className="criteria-header">
+                  <span className="criteria-label">Select Image Criteria</span>
+                </div>
+                <div className="image-filter-buttons">
+                  <div className="filter-buttons-row">
+                    <button
+                      type="button"
+                      className={`filter-btn filter-all ${imageFilter === 'all' ? 'active' : ''}`}
+                      onClick={() => setImageFilter('all')}
+                      disabled={loading}
+                    >
+                      All
+                    </button>
+                  </div>
+                  <div className="filter-buttons-row">
+                    {GROUP_COLORS.map((group) => (
+                      <button
+                        key={group.number}
+                        type="button"
+                        className={`filter-btn ${imageFilter === group.number ? 'active' : ''}`}
+                        style={{ backgroundColor: group.color }}
+                        onClick={() => setImageFilter(group.number)}
+                        disabled={loading}
+                        title={group.name}
+                      >
+                        {group.number}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <label>Images to Add:</label>
-            <div className="image-filter-buttons">
-              <div className="filter-buttons-row">
                 <button
-                  type="button"
-                  className={`filter-btn filter-all ${imageFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setImageFilter('all')}
-                  disabled={loading}
+                  className="project-btn primary"
+                  onClick={handleAddToProject}
+                  disabled={loading || !selectedProject}
                 >
-                  All
+                  {loading ? 'Adding...' : 'Add Images to Project'}
                 </button>
               </div>
-              <div className="filter-buttons-row">
-                {GROUP_COLORS.map((group) => (
-                  <button
-                    key={group.number}
-                    type="button"
-                    className={`filter-btn ${imageFilter === group.number ? 'active' : ''}`}
-                    style={{ backgroundColor: group.color }}
-                    onClick={() => setImageFilter(group.number)}
-                    disabled={loading}
-                    title={group.name}
-                  >
-                    {group.number}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button
-              className="project-btn primary"
-              onClick={handleAddToProject}
-              disabled={loading || !selectedProject}
-            >
-              {loading ? 'Adding...' : 'Add Images to Project'}
-            </button>
-          </div>
-        )}
-
-        {result && (
-          <div className={`project-result ${result.success ? 'success' : 'error'}`}>
-            {result.message}
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Add Project Dialog */}
+      {showAddDialog && (
+        <div className="add-dialog-backdrop" onClick={handleAddDialogBackdrop}>
+          <div className="add-dialog">
+            <h3>Create New Project</h3>
+            <input
+              type="text"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              placeholder="Enter project name..."
+              disabled={creatingProject}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+              autoFocus
+            />
+            <div className="add-dialog-buttons">
+              <button
+                type="button"
+                className="dialog-btn cancel"
+                onClick={() => {
+                  setShowAddDialog(false);
+                  setNewProjectName('');
+                }}
+                disabled={creatingProject}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="dialog-btn create"
+                onClick={handleCreateProject}
+                disabled={creatingProject || !newProjectName.trim()}
+              >
+                {creatingProject ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

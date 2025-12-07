@@ -58,7 +58,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const [regeneratingAI, setRegeneratingAI] = useState(false);
   const [description, setDescription] = useState<string>('');
   const [hoverRating, setHoverRating] = useState<number | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const isDeleted = image.status === 'deleted';
 
@@ -70,26 +69,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     setDescription(image.description || '');
     setNewKeyword('');
     setHoverRating(null);
-    setHasUnsavedChanges(false);
   }, [image.imageGUID, image.groupNumber, image.rating, image.keywords, image.description]);
-
-  // Auto-save changes silently
-  const saveChanges = useCallback(async () => {
-    if (!hasUnsavedChanges || loading || isDeleted) return;
-
-    try {
-      const group = GROUP_COLORS.find(g => g.number === groupNumber);
-      await api.updateImage(image.imageGUID, {
-        groupNumber,
-        colorCode: group?.name.toLowerCase() || 'none',
-        rating,
-        keywords,
-      });
-      setHasUnsavedChanges(false);
-    } catch (err) {
-      console.error('Failed to auto-save changes:', err);
-    }
-  }, [hasUnsavedChanges, loading, isDeleted, groupNumber, rating, keywords, image.imageGUID]);
 
   const handleApprove = useCallback(async () => {
     setLoading(true);
@@ -178,43 +158,65 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     }
   }, [image.imageGUID, onPropertyChange, onNotify]);
 
-  const handleGroupSelect = useCallback((num: number) => {
+  const handleGroupSelect = useCallback(async (num: number) => {
     if (!loading) {
       setGroupNumber(num);
-      setHasUnsavedChanges(true);
       const group = GROUP_COLORS.find(g => g.number === num);
-      onPropertyChange(image.imageGUID, {
-        groupNumber: num,
-        colorCode: group?.name.toLowerCase() || 'none'
-      });
+      const colorCode = group?.name.toLowerCase() || 'none';
+      onPropertyChange(image.imageGUID, { groupNumber: num, colorCode });
+
+      // Save immediately to backend
+      try {
+        await api.updateImage(image.imageGUID, { groupNumber: num, colorCode });
+      } catch (err) {
+        console.error('Failed to save group:', err);
+      }
     }
   }, [loading, image.imageGUID, onPropertyChange]);
 
-  const handleRatingSelect = useCallback((stars: number) => {
+  const handleRatingSelect = useCallback(async (stars: number) => {
     if (!loading) {
       setRating(stars);
-      setHasUnsavedChanges(true);
       onPropertyChange(image.imageGUID, { rating: stars });
+
+      // Save immediately to backend
+      try {
+        await api.updateImage(image.imageGUID, { rating: stars });
+      } catch (err) {
+        console.error('Failed to save rating:', err);
+      }
     }
   }, [loading, image.imageGUID, onPropertyChange]);
 
-  const handleAddKeyword = useCallback(() => {
+  const handleAddKeyword = useCallback(async () => {
     const trimmed = newKeyword.trim();
     if (trimmed && !keywords.includes(trimmed) && !loading) {
       const newKeywords = [...keywords, trimmed];
       setKeywords(newKeywords);
       setNewKeyword('');
-      setHasUnsavedChanges(true);
       onPropertyChange(image.imageGUID, { keywords: newKeywords });
+
+      // Save immediately to backend
+      try {
+        await api.updateImage(image.imageGUID, { keywords: newKeywords });
+      } catch (err) {
+        console.error('Failed to save keywords:', err);
+      }
     }
   }, [newKeyword, keywords, loading, image.imageGUID, onPropertyChange]);
 
-  const handleRemoveKeyword = useCallback((keyword: string) => {
+  const handleRemoveKeyword = useCallback(async (keyword: string) => {
     if (!loading) {
       const newKeywords = keywords.filter(k => k !== keyword);
       setKeywords(newKeywords);
-      setHasUnsavedChanges(true);
       onPropertyChange(image.imageGUID, { keywords: newKeywords });
+
+      // Save immediately to backend
+      try {
+        await api.updateImage(image.imageGUID, { keywords: newKeywords });
+      } catch (err) {
+        console.error('Failed to save keywords:', err);
+      }
     }
   }, [keywords, loading, image.imageGUID, onPropertyChange]);
 
@@ -226,19 +228,17 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     }
   }, [handleAddKeyword]);
 
-  const handlePrev = useCallback(async () => {
+  const handlePrev = useCallback(() => {
     if (hasPrev && !loading) {
-      await saveChanges();
       onNavigate('prev');
     }
-  }, [hasPrev, loading, onNavigate, saveChanges]);
+  }, [hasPrev, loading, onNavigate]);
 
-  const handleNext = useCallback(async () => {
+  const handleNext = useCallback(() => {
     if (hasNext && !loading) {
-      await saveChanges();
       onNavigate('next');
     }
-  }, [hasNext, loading, onNavigate, saveChanges]);
+  }, [hasNext, loading, onNavigate]);
 
   // Keyboard shortcuts
   useEffect(() => {
