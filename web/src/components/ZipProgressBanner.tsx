@@ -20,7 +20,7 @@ interface ZipStatus {
 export const ZipProgressBanner: React.FC<ZipProgressBannerProps> = ({ projects, onComplete }) => {
   const [zipStatuses, setZipStatuses] = useState<ZipStatus[]>([]);
 
-  const checkZipStatus = useCallback(async (project: Project) => {
+  const checkZipStatus = useCallback(async (project: Project): Promise<ZipStatus | null> => {
     try {
       const response = await api.getZipLogs(project.projectId);
       return {
