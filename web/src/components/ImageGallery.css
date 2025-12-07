@@ -251,7 +251,7 @@
 .date-section-line {
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, transparent, #3a4a6a, transparent);
+  background: linear-gradient(90deg, #3a4a6a, transparent);
 }
 
 .date-section-title {
@@ -267,6 +267,70 @@
   font-size: 0.85rem;
   font-weight: 400;
   margin-left: 0.5rem;
+}
+
+.date-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.date-colors {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.date-color-btn {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.3);
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.date-color-btn:hover {
+  transform: scale(1.15);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.date-action-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.date-action-btn {
+  width: 26px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: transform 0.15s, filter 0.15s;
+}
+
+.date-action-btn.approve {
+  background: #27ae60;
+  color: white;
+}
+
+.date-action-btn.reject {
+  background: #e67e22;
+  color: white;
+}
+
+.date-action-btn.delete {
+  background: #c0392b;
+  color: white;
+}
+
+.date-action-btn:hover {
+  transform: scale(1.1);
+  filter: brightness(1.15);
 }
 
 .gallery-grid {

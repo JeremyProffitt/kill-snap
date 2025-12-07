@@ -322,6 +322,97 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     onLogout();
   };
 
+  // Handle bulk action for all images in a date group
+  const handleDateBulkAction = async (
+    dateImages: Image[],
+    action: 'approve' | 'reject' | 'delete',
+    groupNumber?: number
+  ) => {
+    // Filter out images that are already being processed
+    const imagesToProcess = dateImages.filter(img => !processingIds.has(img.imageGUID));
+    if (imagesToProcess.length === 0) return;
+
+    // Add all images to processing set
+    const imageIds = imagesToProcess.map(img => img.imageGUID);
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.add(id));
+      return next;
+    });
+
+    // Determine if this action should remove items from current view
+    const shouldRemoveFromView = (): boolean => {
+      if (selectedProject) return false;
+      if (stateFilter === 'all') return false;
+      switch (action) {
+        case 'approve':
+          return stateFilter === 'unreviewed' || stateFilter === 'rejected';
+        case 'reject':
+          return stateFilter === 'unreviewed' || stateFilter === 'approved';
+        case 'delete':
+          return stateFilter !== 'deleted';
+        default:
+          return false;
+      }
+    };
+
+    const willRemove = shouldRemoveFromView();
+
+    // Optimistic update
+    if (willRemove) {
+      setImages(prev => prev.filter(img => !imageIds.includes(img.imageGUID)));
+    } else {
+      imagesToProcess.forEach(img => {
+        if (action === 'approve' && groupNumber !== undefined) {
+          const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
+          handlePropertyChange(img.imageGUID, { groupNumber, colorCode: colorName });
+        } else if (action === 'delete') {
+          handlePropertyChange(img.imageGUID, { status: 'deleted' });
+        }
+      });
+    }
+
+    // Process all images
+    const results = await Promise.allSettled(
+      imagesToProcess.map(async (image) => {
+        if (action === 'delete') {
+          return api.deleteImage(image.imageGUID);
+        } else if (action === 'approve' && groupNumber !== undefined) {
+          const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
+          return api.updateImage(image.imageGUID, {
+            groupNumber,
+            colorCode: colorName,
+            promoted: false,
+            reviewed: 'true',
+          });
+        } else if (action === 'reject') {
+          return api.updateImage(image.imageGUID, {
+            groupNumber: 0,
+            colorCode: 'white',
+            reviewed: 'true',
+          });
+        }
+      })
+    );
+
+    // Check for failures
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      showNotification(`${failures.length} of ${imagesToProcess.length} images failed to ${action}`, 'error');
+      // Reload to get correct state
+      loadImages();
+    } else {
+      showNotification(`${imagesToProcess.length} images ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'deleted'}`, 'success');
+    }
+
+    // Remove all images from processing set
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.delete(id));
+      return next;
+    });
+  };
+
   // Handle star rating click on thumbnail
   const handleThumbnailRating = async (e: React.MouseEvent, image: Image, stars: number) => {
     e.stopPropagation();
@@ -754,12 +845,53 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
             return (
               <div key={dateGroup.date} className="date-section">
                 <div className="date-section-header">
-                  <div className="date-section-line"></div>
                   <span className="date-section-title">
                     {formatDateForDisplay(dateGroup.date)}
                     <span className="date-section-count">({dateGroup.images.length})</span>
                   </span>
                   <div className="date-section-line"></div>
+                  <div className="date-section-actions">
+                    <div className="date-colors">
+                      {GROUP_COLORS.slice(1).map((group) => (
+                        <button
+                          key={group.number}
+                          type="button"
+                          className="date-color-btn"
+                          style={{ backgroundColor: group.color }}
+                          onClick={() => handleDateBulkAction(dateGroup.images, 'approve', group.number)}
+                          title={`Approve all as ${group.name}`}
+                        >
+                          {group.number}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="date-action-buttons">
+                      <button
+                        type="button"
+                        className="date-action-btn approve"
+                        onClick={() => handleDateBulkAction(dateGroup.images, 'approve', 1)}
+                        title="Approve all"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        className="date-action-btn reject"
+                        onClick={() => handleDateBulkAction(dateGroup.images, 'reject')}
+                        title="Reject all"
+                      >
+                        ✗
+                      </button>
+                      <button
+                        type="button"
+                        className="date-action-btn delete"
+                        onClick={() => handleDateBulkAction(dateGroup.images, 'delete')}
+                        title="Delete all"
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div className="gallery-grid">
                   {dateGroup.images.map((image, localIndex) => {
