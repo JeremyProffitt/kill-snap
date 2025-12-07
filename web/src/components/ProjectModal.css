@@ -241,9 +241,9 @@
 .zip-file-item {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.25rem;
-  padding: 0.35rem;
+  padding: 0.35rem 10px 0.35rem 0.35rem;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   margin-bottom: 0.25rem;

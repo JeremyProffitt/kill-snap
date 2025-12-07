@@ -574,7 +574,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                     onClick={() => setShowProjectModal(true)}
                     className="manage-projects-btn"
                   >
-                    Manage Projects
+                    Manage
                   </button>
                 </div>
               </div>

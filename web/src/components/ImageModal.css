@@ -385,7 +385,7 @@
   border: none;
   color: white;
   cursor: pointer;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   line-height: 1;
   padding: 0;
   width: 14px;
@@ -396,6 +396,8 @@
   justify-content: center;
   margin-left: 0.2rem;
   transition: background 0.15s;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .keyword-delete-btn:hover:not(:disabled) {

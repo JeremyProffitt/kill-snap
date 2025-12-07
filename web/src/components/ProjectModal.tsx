@@ -280,7 +280,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         </div>
         {completedZips.length > 0 && (
           <div className="zip-files-list">
-            <span className="zip-files-label">ZIP Files:</span>
             {completedZips.map((zipFile) => {
               const zipId = `${project.projectId}-${zipFile.key}`;
               const filename = zipFile.key.split('/').pop() || 'download.zip';
@@ -379,8 +378,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 )}
               </div>
 
-              {currentProject && renderProjectDetails(currentProject)}
-
               <div className="add-images-section">
                 <div className="criteria-header">
                   <span className="criteria-label">Select Image Criteria</span>
@@ -423,6 +420,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {currentProject && renderProjectDetails(currentProject)}
             </>
           )}
         </div>
