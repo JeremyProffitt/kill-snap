@@ -462,7 +462,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           </div>
 
           <div className="sidebar-section">
-            <label className="sidebar-label">Project</label>
+            <label className="sidebar-label">View by Project</label>
             <select
               value={selectedProject}
               onChange={(e) => handleProjectChange(e.target.value)}
@@ -480,7 +480,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           {!selectedProject && (
             <>
               <div className="sidebar-section">
-                <label className="sidebar-label">Status</label>
+                <label className="sidebar-label">View by Status</label>
                 <select
                   value={stateFilter}
                   onChange={(e) => setStateFilter(e.target.value as StateFilter)}
@@ -495,7 +495,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
               </div>
 
               <div className="sidebar-section">
-                <label className="sidebar-label">Group</label>
+                <label className="sidebar-label">View by Group</label>
                 <div className="group-boxes-row">
                   <button
                     className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}

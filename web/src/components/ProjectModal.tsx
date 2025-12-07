@@ -385,41 +385,43 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 <div className="criteria-header">
                   <span className="criteria-label">Select Image Criteria</span>
                 </div>
-                <div className="image-filter-buttons">
-                  <div className="filter-buttons-row">
-                    <button
-                      type="button"
-                      className={`filter-btn filter-all ${imageFilter === 'all' ? 'active' : ''}`}
-                      onClick={() => setImageFilter('all')}
-                      disabled={loading}
-                    >
-                      All
-                    </button>
-                  </div>
-                  <div className="filter-buttons-row">
-                    {GROUP_COLORS.map((group) => (
+                <div className="criteria-row">
+                  <div className="image-filter-buttons">
+                    <div className="filter-buttons-row">
                       <button
-                        key={group.number}
                         type="button"
-                        className={`filter-btn ${imageFilter === group.number ? 'active' : ''}`}
-                        style={{ backgroundColor: group.color }}
-                        onClick={() => setImageFilter(group.number)}
+                        className={`filter-btn filter-all ${imageFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => setImageFilter('all')}
                         disabled={loading}
-                        title={group.name}
                       >
-                        {group.number}
+                        All
                       </button>
-                    ))}
+                    </div>
+                    <div className="filter-buttons-row">
+                      {GROUP_COLORS.map((group) => (
+                        <button
+                          key={group.number}
+                          type="button"
+                          className={`filter-btn ${imageFilter === group.number ? 'active' : ''}`}
+                          style={{ backgroundColor: group.color }}
+                          onClick={() => setImageFilter(group.number)}
+                          disabled={loading}
+                          title={group.name}
+                        >
+                          {group.number}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <div className="criteria-divider"></div>
+                  <button
+                    className="add-images-btn"
+                    onClick={handleAddToProject}
+                    disabled={loading || !selectedProject}
+                  >
+                    {loading ? 'Adding...' : 'Add Images to Project'}
+                  </button>
                 </div>
-
-                <button
-                  className="project-btn primary"
-                  onClick={handleAddToProject}
-                  disabled={loading || !selectedProject}
-                >
-                  {loading ? 'Adding...' : 'Add Images to Project'}
-                </button>
               </div>
             </>
           )}
