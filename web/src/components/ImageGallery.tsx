@@ -587,7 +587,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     return images.filter(img => getImageDate(img) === selectedDate);
   }, [images, selectedDate]);
 
-  // Group filtered images by date (sorted newest first)
+  // Group filtered images by date (sorted newest first), with images sorted by filename within each group
   const imagesByDate = React.useMemo(() => {
     const groups: { date: string; images: Image[] }[] = [];
     const dateMap: Record<string, Image[]> = {};
@@ -603,7 +603,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     // Sort dates descending (newest first)
     const sortedDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
     sortedDates.forEach(date => {
-      groups.push({ date, images: dateMap[date] });
+      // Sort images within each date group by filename
+      const sortedImages = dateMap[date].sort((a, b) =>
+        getFilename(a.originalFile).localeCompare(getFilename(b.originalFile))
+      );
+      groups.push({ date, images: sortedImages });
     });
 
     return groups;
