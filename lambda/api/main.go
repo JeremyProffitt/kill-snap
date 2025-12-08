@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
@@ -373,6 +375,7 @@ func findRawFiles(bucket string, originalFile string) []string {
 }
 
 // moveImageFiles moves original, thumbnails, and related files to new location
+// Returns ErrSourceFileMissing if the original file doesn't exist in S3
 func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[string]string, error) {
 	newPaths := make(map[string]string)
 
@@ -382,6 +385,10 @@ func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[st
 	// Skip if source and destination are the same (already in correct location)
 	if img.OriginalFile != newOriginal {
 		if err := copyS3Object(bucket, img.OriginalFile, newOriginal); err != nil {
+			// Check if this is a NoSuchKey error (file doesn't exist)
+			if isNoSuchKeyError(err) {
+				return nil, ErrSourceFileMissing
+			}
 			return nil, fmt.Errorf("failed to copy original: %v", err)
 		}
 		deleteS3Object(bucket, img.OriginalFile)
@@ -454,6 +461,41 @@ func deleteS3Object(bucket, key string) {
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
+}
+
+// isNoSuchKeyError checks if an error is an S3 NoSuchKey error
+func isNoSuchKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var awsErr awserr.Error
+	if errors.As(err, &awsErr) {
+		return awsErr.Code() == s3.ErrCodeNoSuchKey || awsErr.Code() == "NotFound"
+	}
+	return strings.Contains(err.Error(), "NoSuchKey")
+}
+
+// s3ObjectExists checks if an object exists in S3
+func s3ObjectExists(bucket, key string) bool {
+	_, err := s3Client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	return err == nil
+}
+
+// ErrSourceFileMissing indicates the source file doesn't exist in S3
+var ErrSourceFileMissing = errors.New("source file missing from S3")
+
+// deleteImageFromDB removes an image record from DynamoDB
+func deleteImageFromDB(imageGUID string) error {
+	_, err := ddbClient.DeleteItem(&dynamodb.DeleteItemInput{
+		TableName: aws.String(imageTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageGUID)},
+		},
+	})
+	return err
 }
 
 // analyzeImageWithGPT4o sends the image to OpenAI GPT-4o for keyword and description generation
@@ -634,6 +676,14 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 	newPaths, err := moveImageFiles(req.Bucket, img, req.DestPrefix)
 	if err != nil {
 		fmt.Printf("Error moving files: %v\n", err)
+		// If the source file is missing from S3, delete the image record from DynamoDB
+		if errors.Is(err, ErrSourceFileMissing) {
+			fmt.Printf("Source file missing for image %s, deleting from database\n", req.ImageGUID)
+			if delErr := deleteImageFromDB(req.ImageGUID); delErr != nil {
+				fmt.Printf("Error deleting image from DB: %v\n", delErr)
+			}
+			return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": true, "deleted": true, "reason": "source file missing"}`}, nil
+		}
 		// Update status to failed
 		ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
 			TableName: aws.String(imageTable),
@@ -1390,6 +1440,19 @@ func handleDeleteImage(imageID string, headers map[string]string) (events.APIGat
 	newPaths, err := moveImageFiles(bucketName, img, destPrefix)
 	if err != nil {
 		fmt.Printf("Error moving files: %v\n", err)
+		// If the source file is missing from S3, delete the image record from DynamoDB
+		if errors.Is(err, ErrSourceFileMissing) {
+			fmt.Printf("Source file missing for image %s, deleting from database\n", imageID)
+			if delErr := deleteImageFromDB(imageID); delErr != nil {
+				fmt.Printf("Error deleting image from DB: %v\n", delErr)
+				return errorResponse(500, "Failed to delete orphaned image record", headers)
+			}
+			return events.APIGatewayProxyResponse{
+				StatusCode: 200,
+				Headers:    headers,
+				Body:       `{"success": true, "deleted": true, "reason": "source file missing"}`,
+			}, nil
+		}
 		return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
 	}
 
@@ -1454,6 +1517,19 @@ func handleUndeleteImage(imageID string, headers map[string]string) (events.APIG
 	newPaths, err := moveImageFiles(bucketName, img, destPrefix)
 	if err != nil {
 		fmt.Printf("Error moving files: %v\n", err)
+		// If the source file is missing from S3, delete the image record from DynamoDB
+		if errors.Is(err, ErrSourceFileMissing) {
+			fmt.Printf("Source file missing for image %s, deleting from database\n", imageID)
+			if delErr := deleteImageFromDB(imageID); delErr != nil {
+				fmt.Printf("Error deleting image from DB: %v\n", delErr)
+				return errorResponse(500, "Failed to delete orphaned image record", headers)
+			}
+			return events.APIGatewayProxyResponse{
+				StatusCode: 200,
+				Headers:    headers,
+				Body:       `{"success": true, "deleted": true, "reason": "source file missing"}`,
+			}, nil
+		}
 		return errorResponse(500, fmt.Sprintf("Failed to move files: %v", err), headers)
 	}
 
@@ -1694,6 +1770,11 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		newPaths, err := moveImageFiles(bucketName, img, destPrefix)
 		if err != nil {
 			fmt.Printf("Failed to move image %s: %v\n", img.ImageGUID, err)
+			// If the source file is missing from S3, delete the image record from DynamoDB
+			if errors.Is(err, ErrSourceFileMissing) {
+				fmt.Printf("Source file missing for image %s, deleting from database\n", img.ImageGUID)
+				deleteImageFromDB(img.ImageGUID)
+			}
 			continue
 		}
 
