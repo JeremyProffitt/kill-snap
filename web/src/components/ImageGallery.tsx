@@ -190,7 +190,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     if (selectedImageIndex === null) return;
     if (direction === 'prev' && selectedImageIndex > 0) {
       setSelectedImageIndex(selectedImageIndex - 1);
-    } else if (direction === 'next' && selectedImageIndex < images.length - 1) {
+    } else if (direction === 'next' && selectedImageIndex < sortedImages.length - 1) {
       setSelectedImageIndex(selectedImageIndex + 1);
     }
   };
@@ -613,8 +613,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     return groups;
   }, [filteredImages]);
 
-  // Use filteredImages for display, but keep selectedImageIndex relative to filteredImages
-  const selectedImage = selectedImageIndex !== null ? filteredImages[selectedImageIndex] : null;
+  // Flatten imagesByDate into a single sorted array that matches display order
+  // This is the source of truth for modal navigation and click handling
+  const sortedImages = React.useMemo(() => {
+    return imagesByDate.flatMap(group => group.images);
+  }, [imagesByDate]);
+
+  // Use sortedImages for modal display - selectedImageIndex is relative to sortedImages
+  const selectedImage = selectedImageIndex !== null ? sortedImages[selectedImageIndex] : null;
   const currentProject = projects.find(p => p.projectId === selectedProject);
   const completedZips = currentProject?.zipFiles?.filter(z => z.status === 'complete') || [];
   const isGeneratingZipForProject = currentProject?.zipFiles?.some(z => z.status === 'generating') || false;
@@ -842,9 +848,12 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         </div>
       ) : (
         <div className="gallery-sections">
-          {imagesByDate.map((dateGroup) => {
-            // Calculate the starting index for this date group in filteredImages
-            const startIndex = filteredImages.findIndex(img => img.imageGUID === dateGroup.images[0].imageGUID);
+          {imagesByDate.map((dateGroup, dateGroupIndex) => {
+            // Calculate the starting index for this date group in sortedImages
+            // by summing the lengths of all previous date groups
+            const startIndex = imagesByDate
+              .slice(0, dateGroupIndex)
+              .reduce((sum, group) => sum + group.images.length, 0);
 
             return (
               <div key={dateGroup.date} className="date-section">
@@ -1042,9 +1051,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           onPropertyChange={handlePropertyChange}
           onNotify={showNotification}
           hasPrev={selectedImageIndex! > 0}
-          hasNext={selectedImageIndex! < images.length - 1}
+          hasNext={selectedImageIndex! < sortedImages.length - 1}
           currentIndex={selectedImageIndex!}
-          totalImages={images.length}
+          totalImages={sortedImages.length}
         />
       )}
 
