@@ -76,7 +76,7 @@ const formatDateForDisplay = (dateStr: string): string => {
 
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [images, setImages] = useState<Image[]>([]);
-  const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const [selectedImageGUID, setSelectedImageGUID] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
@@ -167,31 +167,29 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     }
   }, [images, loadImages]);
 
-  const handleImageClick = (index: number) => {
-    setSelectedImageIndex(index);
+  const handleImageClick = (imageGUID: string) => {
+    setSelectedImageGUID(imageGUID);
   };
 
   const handleCloseModal = () => {
-    setSelectedImageIndex(null);
+    setSelectedImageGUID(null);
   };
 
   const handleImageUpdate = async () => {
     await loadImages();
-    if (selectedImageIndex !== null) {
-      if (images.length <= 1) {
-        setSelectedImageIndex(null);
-      } else if (selectedImageIndex >= images.length - 1) {
-        setSelectedImageIndex(Math.max(0, images.length - 2));
-      }
-    }
+    // Selection is maintained by GUID - if the image was removed,
+    // sortedImages won't contain it and selectedImage will be undefined
   };
 
   const handleNavigate = (direction: 'prev' | 'next') => {
-    if (selectedImageIndex === null) return;
-    if (direction === 'prev' && selectedImageIndex > 0) {
-      setSelectedImageIndex(selectedImageIndex - 1);
-    } else if (direction === 'next' && selectedImageIndex < sortedImages.length - 1) {
-      setSelectedImageIndex(selectedImageIndex + 1);
+    if (selectedImageGUID === null) return;
+    const currentIndex = sortedImages.findIndex(img => img.imageGUID === selectedImageGUID);
+    if (currentIndex === -1) return;
+
+    if (direction === 'prev' && currentIndex > 0) {
+      setSelectedImageGUID(sortedImages[currentIndex - 1].imageGUID);
+    } else if (direction === 'next' && currentIndex < sortedImages.length - 1) {
+      setSelectedImageGUID(sortedImages[currentIndex + 1].imageGUID);
     }
   };
 
@@ -619,8 +617,15 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     return imagesByDate.flatMap(group => group.images);
   }, [imagesByDate]);
 
-  // Use sortedImages for modal display - selectedImageIndex is relative to sortedImages
-  const selectedImage = selectedImageIndex !== null ? sortedImages[selectedImageIndex] : null;
+  // Find selected image by GUID
+  const selectedImage = selectedImageGUID
+    ? sortedImages.find(img => img.imageGUID === selectedImageGUID) || null
+    : null;
+
+  // Calculate index for display purposes (e.g., "3 of 10")
+  const selectedImageIndex = selectedImageGUID
+    ? sortedImages.findIndex(img => img.imageGUID === selectedImageGUID)
+    : -1;
   const currentProject = projects.find(p => p.projectId === selectedProject);
   const completedZips = currentProject?.zipFiles?.filter(z => z.status === 'complete') || [];
   const isGeneratingZipForProject = currentProject?.zipFiles?.some(z => z.status === 'generating') || false;
@@ -848,14 +853,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         </div>
       ) : (
         <div className="gallery-sections">
-          {imagesByDate.map((dateGroup, dateGroupIndex) => {
-            // Calculate the starting index for this date group in sortedImages
-            // by summing the lengths of all previous date groups
-            const startIndex = imagesByDate
-              .slice(0, dateGroupIndex)
-              .reduce((sum, group) => sum + group.images.length, 0);
-
-            return (
+          {imagesByDate.map((dateGroup) => (
               <div key={dateGroup.date} className="date-section">
                 <div className="date-section-header">
                   <span className="date-section-title">
@@ -907,14 +905,13 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="gallery-grid">
-                  {dateGroup.images.map((image, localIndex) => {
-                    const globalIndex = startIndex + localIndex;
+                  {dateGroup.images.map((image) => {
                     const isDeleted = image.status === 'deleted';
                     return (
                       <div
                         key={image.imageGUID}
                         className={`gallery-item ${processingIds.has(image.imageGUID) ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
-                        onClick={() => handleImageClick(globalIndex)}
+                        onClick={() => handleImageClick(image.imageGUID)}
                       >
                         <div
                           className="thumbnail-container"
@@ -1036,8 +1033,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   })}
                 </div>
               </div>
-            );
-          })}
+          ))}
         </div>
       )}
       </main>
@@ -1050,9 +1046,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           onNavigate={handleNavigate}
           onPropertyChange={handlePropertyChange}
           onNotify={showNotification}
-          hasPrev={selectedImageIndex! > 0}
-          hasNext={selectedImageIndex! < sortedImages.length - 1}
-          currentIndex={selectedImageIndex!}
+          hasPrev={selectedImageIndex > 0}
+          hasNext={selectedImageIndex < sortedImages.length - 1}
+          currentIndex={selectedImageIndex}
           totalImages={sortedImages.length}
         />
       )}
