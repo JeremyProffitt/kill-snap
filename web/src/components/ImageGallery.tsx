@@ -81,7 +81,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [error, setError] = useState('');
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
   const [stateFilter, setStateFilter] = useState<StateFilter>('unreviewed');
-  const [groupFilter, setGroupFilter] = useState<number | 'all'>('all');
+  const [groupFilter, setGroupFilter] = useState<number | 'all'>(0);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [hoverRating, setHoverRating] = useState<{ imageGUID: string; stars: number } | null>(null);
