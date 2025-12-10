@@ -1130,6 +1130,11 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 			continue
 		}
 
+		// Skip images that are already in a project
+		if img.ProjectID != "" {
+			continue
+		}
+
 		// Filter by state (approved vs rejected)
 		if stateFilter == "approved" && img.GroupNumber == 0 {
 			continue // Skip rejected (no group assigned)
