@@ -447,6 +447,18 @@
   flex-shrink: 0;
 }
 
+/* Project name row */
+.info-row-project {
+  text-align: center;
+  margin-bottom: 0.4rem;
+}
+
+.thumb-project-name {
+  font-size: 0.7rem;
+  color: #4fc3f7;
+  font-style: italic;
+}
+
 /* Row 2: Colors left, actions center, rating right */
 .info-row-2 {
   display: flex;

@@ -948,6 +948,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                               {image.width}×{image.height} - {formatFileSize(image.fileSize)}
                             </span>
                           </div>
+                          {/* Project name row (if image is in a project) */}
+                          {image.projectId && (
+                            <div className="info-row-project">
+                              <span className="thumb-project-name">
+                                {projects.find(p => p.projectId === image.projectId)?.name || 'Unknown Project'}
+                              </span>
+                            </div>
+                          )}
                           {/* Row 2: Colors left, actions center, rating right */}
                           <div className="info-row-2">
                             {isDeleted ? (
