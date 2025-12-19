@@ -1,5 +1,11 @@
 # Kill-Snap Project Context
 
+## Deployment
+
+**NEVER use `sam deploy` directly. ALWAYS use the GitHub Actions pipeline for deployments.**
+
+Push changes to the repository and let the CI/CD pipeline handle deployment.
+
 ## UI Terminology
 
 - **Thumbnail Images**: The images displayed in the grid on the Image Review page (ImageGallery component)

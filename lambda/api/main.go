@@ -202,6 +202,63 @@ type AIAnalysisResult struct {
 	Description string   `json:"description"`
 }
 
+// Retry configuration for DynamoDB operations
+const (
+	maxRetries     = 3
+	baseRetryDelay = 250 * time.Millisecond
+)
+
+// retryableError checks if an error is retryable (throttling or transient server errors)
+func retryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if awsErr, ok := err.(awserr.Error); ok {
+		switch awsErr.Code() {
+		case dynamodb.ErrCodeProvisionedThroughputExceededException,
+			dynamodb.ErrCodeRequestLimitExceeded,
+			dynamodb.ErrCodeInternalServerError,
+			"ThrottlingException",
+			"ServiceUnavailable":
+			return true
+		}
+	}
+	return false
+}
+
+// withRetry executes a function with exponential backoff retry for transient errors
+func withRetry[T any](operation func() (T, error)) (T, error) {
+	var result T
+	var err error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		result, err = operation()
+		if err == nil {
+			return result, nil
+		}
+
+		if !retryableError(err) {
+			return result, err
+		}
+
+		if attempt < maxRetries {
+			delay := baseRetryDelay * time.Duration(1<<attempt) // 250ms, 500ms, 1000ms
+			fmt.Printf("DynamoDB operation failed (attempt %d/%d), retrying in %v: %v\n", attempt+1, maxRetries+1, delay, err)
+			time.Sleep(delay)
+		}
+	}
+
+	return result, fmt.Errorf("operation failed after %d retries: %w", maxRetries+1, err)
+}
+
+// withRetryNoResult is like withRetry but for operations that don't return a result
+func withRetryNoResult(operation func() error) error {
+	_, err := withRetry(func() (struct{}, error) {
+		return struct{}{}, operation()
+	})
+	return err
+}
+
 func initializeAdminUser() {
 	fmt.Printf("Initializing admin user: %s\n", adminUsername)
 
@@ -675,38 +732,46 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 	fmt.Printf("Async move started for image %s to %s\n", req.ImageGUID, req.DestPrefix)
 
 	// Update status to "moving"
-	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
-		TableName: aws.String(imageTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ImageGUID": {S: aws.String(req.ImageGUID)},
-		},
-		UpdateExpression: aws.String("SET MoveStatus = :status"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":status": {S: aws.String("moving")},
-		},
-	})
-	if err != nil {
-		fmt.Printf("Error updating move status to moving: %v\n", err)
-	}
-
-	// Get current image metadata
-	getResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String(imageTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ImageGUID": {S: aws.String(req.ImageGUID)},
-		},
-	})
-	if err != nil || getResult.Item == nil {
-		// Update status to failed
-		ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+	err := withRetryNoResult(func() error {
+		_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
 			TableName: aws.String(imageTable),
 			Key: map[string]*dynamodb.AttributeValue{
 				"ImageGUID": {S: aws.String(req.ImageGUID)},
 			},
 			UpdateExpression: aws.String("SET MoveStatus = :status"),
 			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":status": {S: aws.String("failed")},
+				":status": {S: aws.String("moving")},
 			},
+		})
+		return updateErr
+	})
+	if err != nil {
+		fmt.Printf("Error updating move status to moving: %v\n", err)
+	}
+
+	// Get current image metadata
+	getResult, err := withRetry(func() (*dynamodb.GetItemOutput, error) {
+		return ddbClient.GetItem(&dynamodb.GetItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(req.ImageGUID)},
+			},
+		})
+	})
+	if err != nil || getResult.Item == nil {
+		// Update status to failed
+		withRetryNoResult(func() error {
+			_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+				TableName: aws.String(imageTable),
+				Key: map[string]*dynamodb.AttributeValue{
+					"ImageGUID": {S: aws.String(req.ImageGUID)},
+				},
+				UpdateExpression: aws.String("SET MoveStatus = :status"),
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":status": {S: aws.String("failed")},
+				},
+			})
+			return updateErr
 		})
 		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": false, "error": "Image not found"}`}, nil
 	}
@@ -727,37 +792,43 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 			return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": true, "deleted": true, "reason": "source file missing"}`}, nil
 		}
 		// Update status to failed
-		ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
-			TableName: aws.String(imageTable),
-			Key: map[string]*dynamodb.AttributeValue{
-				"ImageGUID": {S: aws.String(req.ImageGUID)},
-			},
-			UpdateExpression: aws.String("SET MoveStatus = :status"),
-			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":status": {S: aws.String("failed")},
-			},
+		withRetryNoResult(func() error {
+			_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+				TableName: aws.String(imageTable),
+				Key: map[string]*dynamodb.AttributeValue{
+					"ImageGUID": {S: aws.String(req.ImageGUID)},
+				},
+				UpdateExpression: aws.String("SET MoveStatus = :status"),
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":status": {S: aws.String("failed")},
+				},
+			})
+			return updateErr
 		})
 		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: fmt.Sprintf(`{"success": false, "error": "%v"}`, err)}, nil
 	}
 
 	// Update DynamoDB with new paths and complete status
-	_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
-		TableName: aws.String(imageTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ImageGUID": {S: aws.String(req.ImageGUID)},
-		},
-		UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :newStatus, MoveStatus = :moveStatus, UpdatedDateTime = :updated"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":orig":       {S: aws.String(newPaths["original"])},
-			":t50":        {S: aws.String(newPaths["thumbnail50"])},
-			":t400":       {S: aws.String(newPaths["thumbnail400"])},
-			":newStatus":  {S: aws.String(req.NewStatus)},
-			":moveStatus": {S: aws.String("complete")},
-			":updated":    {S: aws.String(time.Now().Format(time.RFC3339))},
-		},
-		ExpressionAttributeNames: map[string]*string{
-			"#status": aws.String("Status"),
-		},
+	err = withRetryNoResult(func() error {
+		_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(req.ImageGUID)},
+			},
+			UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :newStatus, MoveStatus = :moveStatus, UpdatedDateTime = :updated"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":orig":       {S: aws.String(newPaths["original"])},
+				":t50":        {S: aws.String(newPaths["thumbnail50"])},
+				":t400":       {S: aws.String(newPaths["thumbnail400"])},
+				":newStatus":  {S: aws.String(req.NewStatus)},
+				":moveStatus": {S: aws.String("complete")},
+				":updated":    {S: aws.String(time.Now().Format(time.RFC3339))},
+			},
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
+		})
+		return updateErr
 	})
 	if err != nil {
 		fmt.Printf("Error updating image after move: %v\n", err)
@@ -807,14 +878,17 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 				exprAttrValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
 			}
 
-			_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
-				TableName: aws.String(imageTable),
-				Key: map[string]*dynamodb.AttributeValue{
-					"ImageGUID": {S: aws.String(req.ImageGUID)},
-				},
-				UpdateExpression:          aws.String(updateExpr),
-				ExpressionAttributeValues: exprAttrValues,
-				ExpressionAttributeNames:  exprAttrNames,
+			updateErr := withRetryNoResult(func() error {
+				_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+					TableName: aws.String(imageTable),
+					Key: map[string]*dynamodb.AttributeValue{
+						"ImageGUID": {S: aws.String(req.ImageGUID)},
+					},
+					UpdateExpression:          aws.String(updateExpr),
+					ExpressionAttributeValues: exprAttrValues,
+					ExpressionAttributeNames:  exprAttrNames,
+				})
+				return err
 			})
 			if updateErr != nil {
 				fmt.Printf("Error updating image with AI analysis: %v\n", updateErr)
@@ -1192,11 +1266,13 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 	}
 
 	// Get current image metadata to check if this is a new review
-	getResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String(imageTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ImageGUID": {S: aws.String(imageID)},
-		},
+	getResult, err := withRetry(func() (*dynamodb.GetItemOutput, error) {
+		return ddbClient.GetItem(&dynamodb.GetItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(imageID)},
+			},
+		})
 	})
 	if err != nil || getResult.Item == nil {
 		return errorResponse(404, "Image not found", headers)
@@ -1291,7 +1367,10 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		updateInput.ExpressionAttributeNames = exprAttrNames
 	}
 
-	_, err = ddbClient.UpdateItem(updateInput)
+	err = withRetryNoResult(func() error {
+		_, updateErr := ddbClient.UpdateItem(updateInput)
+		return updateErr
+	})
 	if err != nil {
 		fmt.Printf("Error updating image: %v\n", err)
 		return errorResponse(500, "Failed to update image", headers)
@@ -1308,9 +1387,12 @@ func handleUpdateImage(imageID string, request events.APIGatewayProxyRequest, he
 		"Timestamp":   {S: aws.String(time.Now().Format(time.RFC3339))},
 	}
 
-	ddbClient.PutItem(&dynamodb.PutItemInput{
-		TableName: aws.String(reviewGroupsTable),
-		Item:      reviewItem,
+	withRetryNoResult(func() error {
+		_, putErr := ddbClient.PutItem(&dynamodb.PutItemInput{
+			TableName: aws.String(reviewGroupsTable),
+			Item:      reviewItem,
+		})
+		return putErr
 	})
 
 	// Trigger async file move if needed

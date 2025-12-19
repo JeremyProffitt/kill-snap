@@ -1,7 +1,39 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
 import { Image, UpdateImageRequest, Project, AddToProjectRequest } from '../types';
+
+const RETRY_DELAYS = [250, 500, 1000]; // Quarter, half, and one second
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+
+      // Don't retry on client errors (4xx) except 429 (rate limit)
+      if (error instanceof AxiosError && error.response) {
+        const status = error.response.status;
+        if (status >= 400 && status < 500 && status !== 429) {
+          throw error;
+        }
+      }
+
+      // If we've exhausted all retries, throw
+      if (attempt >= RETRY_DELAYS.length) {
+        throw error;
+      }
+
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
+    }
+  }
+
+  throw lastError;
+}
 
 export interface TransferProgressCallback {
   (currentFile: string, currentIndex: number, totalCount: number): void;
@@ -33,25 +65,31 @@ export const api = {
   },
 
   async updateImage(imageId: string, update: UpdateImageRequest): Promise<void> {
-    await axios.put(
-      `${API_BASE_URL}/api/images/${imageId}`,
-      update,
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.put(
+        `${API_BASE_URL}/api/images/${imageId}`,
+        update,
+        { headers: authService.getAuthHeader() }
+      )
     );
   },
 
   async deleteImage(imageId: string): Promise<void> {
-    await axios.delete(
-      `${API_BASE_URL}/api/images/${imageId}`,
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.delete(
+        `${API_BASE_URL}/api/images/${imageId}`,
+        { headers: authService.getAuthHeader() }
+      )
     );
   },
 
   async undeleteImage(imageId: string): Promise<void> {
-    await axios.post(
-      `${API_BASE_URL}/api/images/${imageId}/undelete`,
-      {},
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.post(
+        `${API_BASE_URL}/api/images/${imageId}/undelete`,
+        {},
+        { headers: authService.getAuthHeader() }
+      )
     );
   },
 
@@ -89,10 +127,12 @@ export const api = {
   },
 
   async addToProject(projectId: string, filters: AddToProjectRequest): Promise<{ movedCount: number }> {
-    const response = await axios.post<{ movedCount: number }>(
-      `${API_BASE_URL}/api/projects/${projectId}/images`,
-      filters,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.post<{ movedCount: number }>(
+        `${API_BASE_URL}/api/projects/${projectId}/images`,
+        filters,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
@@ -160,10 +200,12 @@ export const api = {
   },
 
   async regenerateAI(imageId: string): Promise<{ keywords: string[]; description: string }> {
-    const response = await axios.post<{ success: boolean; keywords: string[]; description: string }>(
-      `${API_BASE_URL}/api/images/${imageId}/regenerate-ai`,
-      {},
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.post<{ success: boolean; keywords: string[]; description: string }>(
+        `${API_BASE_URL}/api/images/${imageId}/regenerate-ai`,
+        {},
+        { headers: authService.getAuthHeader() }
+      )
     );
     return { keywords: response.data.keywords, description: response.data.description };
   },
