@@ -170,9 +170,9 @@ func generateThumbnail(img image.Image, height int) (*bytes.Buffer, error) {
 	// Apply mild sharpening to improve clarity after resize
 	thumbnail = imaging.Sharpen(thumbnail, 0.5)
 
-	// Encode to JPEG with high quality
+	// Encode to JPEG with good quality
 	buf := new(bytes.Buffer)
-	if err := jpeg.Encode(buf, thumbnail, &jpeg.Options{Quality: 92}); err != nil {
+	if err := jpeg.Encode(buf, thumbnail, &jpeg.Options{Quality: 80}); err != nil {
 		return nil, err
 	}
 
