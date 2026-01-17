@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { THEME_COLORS, UI_STYLES, DEFAULT_THEME_COLOR, DEFAULT_UI_STYLE, ThemeColor, UIStyle } from '../theme/themeConstants';
+import { THEME_COLORS, UI_STYLES } from '../theme/themeConstants';
 import { api } from '../services/api';
 import './ThemeSettings.css';
 
