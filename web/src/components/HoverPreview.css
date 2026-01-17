@@ -1,0 +1,103 @@
+.hover-preview {
+  position: fixed;
+  z-index: 2000;
+  background: #1a1a2e;
+  border: 1px solid #2a3a5a;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.hover-preview.loaded {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.hover-preview-image-container {
+  position: relative;
+  max-width: 400px;
+  max-height: 280px;
+  overflow: hidden;
+  background: #0f0f1a;
+}
+
+.hover-preview-image-container img {
+  display: block;
+  max-width: 100%;
+  max-height: 280px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.hover-preview-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0f1a;
+}
+
+.hover-preview-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: hoverPreviewSpin 0.8s linear infinite;
+}
+
+@keyframes hoverPreviewSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hover-preview-info {
+  padding: 12px;
+  background: linear-gradient(to bottom, #1a1a2e, #16213e);
+}
+
+.hover-preview-filename {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+
+.hover-preview-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #8892a6;
+  margin-bottom: 6px;
+}
+
+.hover-preview-keywords {
+  font-size: 11px;
+  color: #6c7a8a;
+  line-height: 1.4;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-preview-rating {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #f1c40f;
+  letter-spacing: 2px;
+}

@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { Image } from '../types';
+import { Filmstrip } from './Filmstrip';
 import './ImageModal.css';
 
 interface ImageModalProps {
   image: Image;
+  images: Image[];
   onClose: () => void;
   onUpdate: () => void;
   onNavigate: (direction: 'prev' | 'next') => void;
@@ -14,9 +16,10 @@ interface ImageModalProps {
   hasNext: boolean;
   currentIndex: number;
   totalImages: number;
+  showFilmstrip?: boolean;
+  onFilmstripToggle?: (show: boolean) => void;
 }
 
-// Lightroom color labels: Red, Yellow, Green, Blue, Purple (no white/0)
 const GROUP_COLORS = [
   { number: 1, color: '#e74c3c', name: 'Red', textColor: '#fff' },
   { number: 2, color: '#f1c40f', name: 'Yellow', textColor: '#333' },
@@ -39,6 +42,7 @@ const getFilename = (path: string): string => {
 
 export const ImageModal: React.FC<ImageModalProps> = ({
   image,
+  images,
   onClose,
   onUpdate,
   onNavigate,
@@ -48,6 +52,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   hasNext,
   currentIndex,
   totalImages,
+  showFilmstrip = false,
+  onFilmstripToggle,
 }) => {
   const [groupNumber, setGroupNumber] = useState<number>(0);
   const [rating, setRating] = useState<number>(0);
@@ -57,10 +63,19 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const [regeneratingAI, setRegeneratingAI] = useState(false);
   const [description, setDescription] = useState<string>('');
   const [hoverRating, setHoverRating] = useState<number | null>(null);
+  
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  
+  // Touch state
+  const lastPinchDistance = useRef<number | null>(null);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   const isDeleted = image.status === 'deleted';
 
-  // Reset group, rating, keywords, and description when image changes
   useEffect(() => {
     setGroupNumber(image.groupNumber || 0);
     setRating(image.rating || 0);
@@ -68,6 +83,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     setDescription(image.description || '');
     setNewKeyword('');
     setHoverRating(null);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   }, [image.imageGUID, image.groupNumber, image.rating, image.keywords, image.description]);
 
   const handleApprove = useCallback(async () => {
@@ -84,7 +101,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       });
       onUpdate();
     } catch (err: any) {
-      console.error('Failed to approve image:', err);
       const errorMessage = err.response?.data?.error || 'Failed to approve image';
       onNotify(errorMessage, 'error');
     } finally {
@@ -102,7 +118,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       });
       onUpdate();
     } catch (err: any) {
-      console.error('Failed to reject image:', err);
       const errorMessage = err.response?.data?.error || 'Failed to reject image';
       onNotify(errorMessage, 'error');
     } finally {
@@ -116,7 +131,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       await api.deleteImage(image.imageGUID);
       onUpdate();
     } catch (err: any) {
-      console.error('Failed to delete image:', err);
       const errorMessage = err.response?.data?.error || 'Failed to delete image';
       onNotify(errorMessage, 'error');
     } finally {
@@ -130,7 +144,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       await api.undeleteImage(image.imageGUID);
       onUpdate();
     } catch (err: any) {
-      console.error('Failed to undelete image:', err);
       const errorMessage = err.response?.data?.error || 'Failed to undelete image';
       onNotify(errorMessage, 'error');
     } finally {
@@ -149,7 +162,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
         description: result.description
       });
     } catch (err: any) {
-      console.error('Failed to regenerate AI content:', err);
       const message = err.response?.data?.error || 'Failed to regenerate AI content';
       onNotify(message, 'error');
     } finally {
@@ -163,8 +175,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       const group = GROUP_COLORS.find(g => g.number === num);
       const colorCode = group?.name.toLowerCase() || 'none';
       onPropertyChange(image.imageGUID, { groupNumber: num, colorCode });
-
-      // Save immediately to backend
       try {
         await api.updateImage(image.imageGUID, { groupNumber: num, colorCode });
       } catch (err) {
@@ -177,8 +187,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     if (!loading) {
       setRating(stars);
       onPropertyChange(image.imageGUID, { rating: stars });
-
-      // Save immediately to backend
       try {
         await api.updateImage(image.imageGUID, { rating: stars });
       } catch (err) {
@@ -194,8 +202,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       setKeywords(newKeywords);
       setNewKeyword('');
       onPropertyChange(image.imageGUID, { keywords: newKeywords });
-
-      // Save immediately to backend
       try {
         await api.updateImage(image.imageGUID, { keywords: newKeywords });
       } catch (err) {
@@ -209,8 +215,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       const newKeywords = keywords.filter(k => k !== keyword);
       setKeywords(newKeywords);
       onPropertyChange(image.imageGUID, { keywords: newKeywords });
-
-      // Save immediately to backend
       try {
         await api.updateImage(image.imageGUID, { keywords: newKeywords });
       } catch (err) {
@@ -239,185 +243,227 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     }
   }, [hasNext, loading, onNavigate]);
 
+  // Zoom handlers
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom(prev => Math.min(Math.max(prev * delta, 0.5), 5));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom > 1) {
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  }, [zoom, pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging) {
+      setPan({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y,
+      });
+    }
+  }, [isDragging, dragStart]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleDoubleClick = useCallback(() => {
+    if (zoom === 1) {
+      setZoom(2);
+    } else {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    }
+  }, [zoom]);
+
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Touch handlers
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    } else if (e.touches.length === 2) {
+      const distance = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      lastPinchDistance.current = distance;
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 2 && lastPinchDistance.current) {
+      const distance = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const scale = distance / lastPinchDistance.current;
+      setZoom(prev => Math.min(Math.max(prev * scale, 0.5), 5));
+      lastPinchDistance.current = distance;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.changedTouches.length === 1 && touchStart.current) {
+      const deltaX = e.changedTouches[0].clientX - touchStart.current.x;
+      const deltaY = e.changedTouches[0].clientY - touchStart.current.y;
+      const minSwipe = 50;
+
+      if (Math.abs(deltaX) > Math.abs(deltaY) && zoom === 1) {
+        if (deltaX > minSwipe) handlePrev();
+        else if (deltaX < -minSwipe) handleNext();
+      }
+    }
+    touchStart.current = null;
+    lastPinchDistance.current = null;
+  }, [zoom, handlePrev, handleNext]);
+
+  const handleFilmstripSelect = useCallback((imageGUID: string) => {
+    const index = images.findIndex(img => img.imageGUID === imageGUID);
+    if (index !== -1 && index !== currentIndex) {
+      if (index < currentIndex) {
+        for (let i = 0; i < currentIndex - index; i++) onNavigate('prev');
+      } else {
+        for (let i = 0; i < index - currentIndex; i++) onNavigate('next');
+      }
+    }
+  }, [images, currentIndex, onNavigate]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       const key = e.key;
 
-      // Arrow keys for navigation
-      if (key === 'ArrowLeft') {
-        e.preventDefault();
-        handlePrev();
-        return;
-      }
-      if (key === 'ArrowRight') {
-        e.preventDefault();
-        handleNext();
-        return;
-      }
-
-      // Number keys 1-5 for group selection (Lightroom colors)
-      if (key >= '1' && key <= '5' && !isDeleted) {
-        e.preventDefault();
-        handleGroupSelect(parseInt(key));
-        return;
-      }
-
-      // Escape to close
-      if (key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-
-      // Enter to approve (or undelete if deleted)
-      if (key === 'Enter') {
-        e.preventDefault();
-        if (isDeleted) {
-          handleUndelete();
-        } else {
-          handleApprove();
-        }
-        return;
-      }
-
-      // 'r' to reject
-      if ((key === 'r' || key === 'R') && !isDeleted) {
-        e.preventDefault();
-        handleReject();
-        return;
-      }
-
-      // 'd' or Delete to delete
-      if ((key === 'd' || key === 'D' || key === 'Delete') && !isDeleted) {
-        e.preventDefault();
-        handleDelete();
-        return;
-      }
-
-      // 'u' to undelete
-      if ((key === 'u' || key === 'U') && isDeleted) {
-        e.preventDefault();
-        handleUndelete();
-        return;
-      }
+      if (key === 'ArrowLeft') { e.preventDefault(); handlePrev(); return; }
+      if (key === 'ArrowRight') { e.preventDefault(); handleNext(); return; }
+      if (key >= '1' && key <= '5' && !isDeleted) { e.preventDefault(); handleGroupSelect(parseInt(key)); return; }
+      if (key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (key === 'Enter') { e.preventDefault(); isDeleted ? handleUndelete() : handleApprove(); return; }
+      if ((key === 'r' || key === 'R') && !isDeleted) { e.preventDefault(); handleReject(); return; }
+      if ((key === 'd' || key === 'D' || key === 'Delete') && !isDeleted) { e.preventDefault(); handleDelete(); return; }
+      if ((key === 'u' || key === 'U') && isDeleted) { e.preventDefault(); handleUndelete(); return; }
+      if (key === '+' || key === '=') { e.preventDefault(); setZoom(prev => Math.min(prev * 1.2, 5)); return; }
+      if (key === '-') { e.preventDefault(); setZoom(prev => Math.max(prev * 0.8, 0.5)); return; }
+      if (key === '0') { e.preventDefault(); resetZoom(); return; }
+      if (key === 'f' || key === 'F') { e.preventDefault(); onFilmstripToggle?.(!showFilmstrip); return; }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handleUndelete, handlePrev, handleNext, onClose, groupNumber, isDeleted]);
+  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handleUndelete, handlePrev, handleNext, onClose, isDeleted, showFilmstrip, onFilmstripToggle, resetZoom]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose();
-    }
+    if (e.target === e.currentTarget) onClose();
   };
 
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
-      <div className="modal-content">
-        <button className="close-button" onClick={onClose} disabled={loading}>
-          ×
-        </button>
+      <div className={`modal-content ${showFilmstrip ? 'with-filmstrip' : ''}`}>
+        <button className="close-button" onClick={onClose} disabled={loading}>X</button>
 
         <div className="modal-body">
           <div className="modal-header">
             <h2 className="modal-title">Review Image</h2>
-            <div className="image-counter">
-              {currentIndex + 1} / {totalImages}
-            </div>
+            <div className="image-counter">{currentIndex + 1} / {totalImages}</div>
           </div>
 
-          <div className="image-preview-container">
-            {/* Left Navigation Arrow */}
+          <div 
+            className="image-preview-container"
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onDoubleClick={handleDoubleClick}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
             <button
               className={`image-nav-arrow image-nav-prev ${!hasPrev ? 'disabled' : ''}`}
               onClick={handlePrev}
               disabled={!hasPrev || loading}
-              title="Previous (←)"
+              title="Previous"
             >
-              ‹
+              &lt;
             </button>
 
             <div className="image-preview">
               <img
                 src={api.getImageUrl(image.bucket, image.thumbnail400)}
                 alt={image.originalFile}
+                style={{
+                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'zoom-in',
+                  transition: isDragging ? 'none' : 'transform 0.1s ease',
+                }}
+                draggable={false}
               />
             </div>
 
-            {/* Right Navigation Arrow */}
             <button
               className={`image-nav-arrow image-nav-next ${!hasNext ? 'disabled' : ''}`}
               onClick={handleNext}
               disabled={!hasNext || loading}
-              title="Next (→)"
+              title="Next"
             >
-              ›
+              &gt;
             </button>
+
+            {zoom !== 1 && (
+              <div className="zoom-controls">
+                <span className="zoom-level">{Math.round(zoom * 100)}%</span>
+                <button onClick={resetZoom} className="zoom-reset-btn">Reset</button>
+              </div>
+            )}
           </div>
 
-          {/* Action buttons centered under image */}
+          <Filmstrip
+            images={images}
+            currentImageGUID={image.imageGUID}
+            onImageSelect={handleFilmstripSelect}
+            visible={showFilmstrip}
+          />
+
+          <button
+            className="filmstrip-toggle-btn"
+            onClick={() => onFilmstripToggle?.(!showFilmstrip)}
+            title={showFilmstrip ? 'Hide filmstrip (F)' : 'Show filmstrip (F)'}
+          >
+            {showFilmstrip ? 'Hide Filmstrip' : 'Show Filmstrip'}
+          </button>
+
           <div className="action-buttons-row">
             {isDeleted ? (
-              <button
-                type="button"
-                className="action-btn undelete"
-                onClick={handleUndelete}
-                disabled={loading}
-                title="Undelete (U)"
-              >
-                ↩ Undelete
+              <button type="button" className="action-btn undelete" onClick={handleUndelete} disabled={loading} title="Undelete (U)">
+                Undelete
               </button>
             ) : (
               <>
-                <button
-                  type="button"
-                  className="action-btn approve"
-                  onClick={handleApprove}
-                  disabled={loading}
-                  title="Approve (Enter)"
-                >
-                  ✓
-                </button>
-                <button
-                  type="button"
-                  className="action-btn reject"
-                  onClick={handleReject}
-                  disabled={loading}
-                  title="Reject (R)"
-                >
-                  ✗
-                </button>
-                <button
-                  type="button"
-                  className="action-btn delete"
-                  onClick={handleDelete}
-                  disabled={loading}
-                  title="Delete (D)"
-                >
-                  🗑
-                </button>
+                <button type="button" className="action-btn approve" onClick={handleApprove} disabled={loading} title="Approve (Enter)">V</button>
+                <button type="button" className="action-btn reject" onClick={handleReject} disabled={loading} title="Reject (R)">X</button>
+                <button type="button" className="action-btn delete" onClick={handleDelete} disabled={loading} title="Delete (D)">D</button>
               </>
             )}
           </div>
 
-          {/* Image info bar: filename left, dimensions right */}
           <div className="image-info-bar">
             <div className="info-left">
               <span className="info-filename">{getFilename(image.originalFile)}</span>
             </div>
             <div className="info-right">
-              <span className="info-dimensions">{image.width}×{image.height} - {formatFileSize(image.fileSize)}</span>
+              <span className="info-dimensions">{image.width}x{image.height} - {formatFileSize(image.fileSize)}</span>
             </div>
           </div>
 
-          {/* Controls row: colors left, rating right */}
           {!isDeleted && (
             <div className="controls-row">
               <div className="group-buttons">
@@ -425,35 +471,29 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                   <button
                     key={group.number}
                     className={`group-btn ${groupNumber === group.number ? 'selected' : ''}`}
-                    style={{
-                      '--group-color': group.color,
-                      '--group-text-color': group.textColor,
-                    } as React.CSSProperties}
+                    style={{ '--group-color': group.color, '--group-text-color': group.textColor } as React.CSSProperties}
                     onClick={() => handleGroupSelect(group.number)}
                     disabled={loading}
-                    title={`${group.name} (Press ${group.number})`}
+                    title={`${group.name} (${group.number})`}
                   >
                     {group.number}
                   </button>
                 ))}
               </div>
-              <div
-                className="rating-stars"
-                onMouseLeave={() => setHoverRating(null)}
-              >
+              <div className="rating-stars" onMouseLeave={() => setHoverRating(null)}>
                 {[1, 2, 3, 4, 5].map((star) => {
                   const displayRating = hoverRating !== null ? hoverRating : rating;
                   const isFilled = displayRating >= star;
                   return (
                     <button
                       key={star}
-                      className={`star-btn ${isFilled ? 'filled' : 'empty'} ${hoverRating !== null && star <= hoverRating ? 'hover-preview' : ''}`}
+                      className={`star-btn ${isFilled ? 'filled' : 'empty'}`}
                       onClick={() => handleRatingSelect(star === rating ? 0 : star)}
                       onMouseEnter={() => setHoverRating(star)}
                       disabled={loading}
                       title={`${star} star${star > 1 ? 's' : ''}`}
                     >
-                      {isFilled ? '★' : '☆'}
+                      {isFilled ? '*' : 'o'}
                     </button>
                   );
                 })}
@@ -462,23 +502,13 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           )}
 
           <div className="keywords-section">
-            <div className="keywords-header">
-              <span className="keywords-label">Keywords</span>
-            </div>
+            <div className="keywords-header"><span className="keywords-label">Keywords</span></div>
             <div className="keywords-list">
               {keywords.length > 0 ? (
                 keywords.map((keyword, index) => (
                   <span key={keyword} className="keyword-item">
                     {keyword}
-                    <button
-                      type="button"
-                      className="keyword-delete-btn"
-                      onClick={() => handleRemoveKeyword(keyword)}
-                      disabled={loading}
-                      title="Remove keyword"
-                    >
-                      ×
-                    </button>
+                    <button type="button" className="keyword-delete-btn" onClick={() => handleRemoveKeyword(keyword)} disabled={loading}>x</button>
                     {index < keywords.length - 1 && <span className="keyword-comma">,</span>}
                   </span>
                 ))
@@ -496,20 +526,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                 disabled={loading}
                 className="keyword-input"
               />
-              <button
-                type="button"
-                onClick={handleAddKeyword}
-                disabled={loading || !newKeyword.trim()}
-                className="keyword-add-btn"
-              >
-                Add
-              </button>
-              <button
-                className="ai-generate-btn"
-                onClick={handleRegenerateAI}
-                disabled={loading || regeneratingAI}
-                title="Ask AI to generate keywords and description"
-              >
+              <button type="button" onClick={handleAddKeyword} disabled={loading || !newKeyword.trim()} className="keyword-add-btn">Add</button>
+              <button className="ai-generate-btn" onClick={handleRegenerateAI} disabled={loading || regeneratingAI}>
                 {regeneratingAI ? 'Analyzing...' : 'Ask AI to Generate'}
               </button>
             </div>
@@ -520,17 +538,18 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             {description ? (
               <p className="description-text">{description}</p>
             ) : (
-              <p className="description-placeholder">No AI description yet. Click "Regenerate AI" to generate.</p>
+              <p className="description-placeholder">No AI description yet.</p>
             )}
           </div>
 
           <div className="keyboard-hints">
-            <span>← → Nav</span>
+            <span>Left/Right Nav</span>
             <span>1-5 Color</span>
             <span>Enter {isDeleted ? 'Undelete' : 'Approve'}</span>
             {!isDeleted && <span>R Reject</span>}
             {!isDeleted && <span>D Delete</span>}
             {isDeleted && <span>U Undelete</span>}
+            <span>F Filmstrip</span>
             <span>Esc Close</span>
           </div>
         </div>

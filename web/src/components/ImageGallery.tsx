@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { api, ImageFilters } from '../services/api';
 import { authService } from '../services/auth';
 import { Image, Project, ZipFile } from '../types';
@@ -7,6 +7,15 @@ import { ProjectModal } from './ProjectModal';
 import { TransferBanner, TransferProgress } from './TransferBanner';
 import { ZipProgressBanner } from './ZipProgressBanner';
 import { NotificationBanner, Notification } from './NotificationBanner';
+import { BulkActionBar } from './BulkActionBar';
+import { HoverPreview } from './HoverPreview';
+import { ConfirmDialog } from './ConfirmDialog';
+import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
+import { EmptyState } from './EmptyState';
+import { PageSkeleton } from './SkeletonLoader';
+import { getPreferences, savePreference, UserPreferences } from '../services/preferences';
+import { undoManager, generateUndoId } from '../services/undoManager';
+import { saveScrollPosition, restoreScrollPosition, updateURLState, getURLParam } from '../services/sessionStorage';
 import './ImageGallery.css';
 
 interface ImageGalleryProps {
@@ -39,16 +48,13 @@ const getFilename = (path: string): string => {
 
 // Extract date from image (prefer EXIF DateTimeOriginal, fall back to InsertedDateTime)
 const getImageDate = (image: Image): string => {
-  // Try EXIF DateTimeOriginal first
   if (image.exifData?.DateTimeOriginal) {
     const cleaned = image.exifData.DateTimeOriginal.replace(/"/g, '');
-    // EXIF format: "2024:01:15 14:30:00" -> "2024-01-15"
     const match = cleaned.match(/^(\d{4}):(\d{2}):(\d{2})/);
     if (match) {
       return `${match[1]}-${match[2]}-${match[3]}`;
     }
   }
-  // Try DateTime
   if (image.exifData?.DateTime) {
     const cleaned = image.exifData.DateTime.replace(/"/g, '');
     const match = cleaned.match(/^(\d{4}):(\d{2}):(\d{2})/);
@@ -56,14 +62,12 @@ const getImageDate = (image: Image): string => {
       return `${match[1]}-${match[2]}-${match[3]}`;
     }
   }
-  // Fall back to InsertedDateTime
   if (image.insertedDateTime) {
     return image.insertedDateTime.split('T')[0];
   }
   return 'Unknown';
 };
 
-// Format date for display (e.g., "2024-01-15" -> "Jan 15, 2024")
 const formatDateForDisplay = (dateStr: string): string => {
   if (dateStr === 'Unknown') return 'Unknown Date';
   const date = new Date(dateStr);
@@ -74,26 +78,78 @@ const formatDateForDisplay = (dateStr: string): string => {
   });
 };
 
+// Fuzzy match function for search
+const fuzzyMatch = (text: string, query: string): boolean => {
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  if (lowerText.includes(lowerQuery)) return true;
+  let queryIndex = 0;
+  for (let i = 0; i < lowerText.length && queryIndex < lowerQuery.length; i++) {
+    if (lowerText[i] === lowerQuery[queryIndex]) {
+      queryIndex++;
+    }
+  }
+  return queryIndex === lowerQuery.length;
+};
+
 export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
+  // Load preferences
+  const [preferences, setPreferences] = useState<UserPreferences>(getPreferences);
+  
+  // Core state
   const [images, setImages] = useState<Image[]>([]);
   const [selectedImageGUID, setSelectedImageGUID] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
-  const [stateFilter, setStateFilter] = useState<StateFilter>('unreviewed');
-  const [groupFilter, setGroupFilter] = useState<number | 'all'>(0);
+  
+  // Filter state
+  const [stateFilter, setStateFilter] = useState<StateFilter>(preferences.defaultStatusFilter as StateFilter);
+  const [groupFilter, setGroupFilter] = useState<number | 'all'>(preferences.defaultColorFilter);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  
+  // Project state
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
-  const [hoverRating, setHoverRating] = useState<{ imageGUID: string; stars: number } | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>('');
   const [targetProject, setTargetProject] = useState<string>('');
   const [addingToProject, setAddingToProject] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
+  
+  // UI state
+  const [hoverRating, setHoverRating] = useState<{ imageGUID: string; stars: number } | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [thumbnailSize, setThumbnailSize] = useState<number>(preferences.thumbnailSize);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(preferences.sidebarCollapsed);
   const [generatingZip, setGeneratingZip] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState<string | null>(null);
+  
+  // Selection state (multi-select)
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [focusedImageIndex, setFocusedImageIndex] = useState<number | null>(null);
+  
+  // Hover preview state
+  const [hoverImage, setHoverImage] = useState<Image | null>(null);
+  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+  
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmLabel?: string;
+    confirmVariant?: 'danger' | 'primary' | 'warning';
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  
+  // Keyboard shortcuts help
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  
+  // Transfer and notification state
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
     isActive: false,
     currentFile: '',
@@ -103,6 +159,39 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     status: 'transferring',
   });
   const [notification, setNotification] = useState<Notification | null>(null);
+  
+  // Refs
+  const galleryRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Save scroll position before unload
+  useEffect(() => {
+    const handleBeforeUnload = () => saveScrollPosition();
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Restore scroll position on mount
+  useEffect(() => {
+    restoreScrollPosition();
+  }, []);
+
+  // Check URL for deep-linked image
+  useEffect(() => {
+    const imageGUID = getURLParam('image');
+    if (imageGUID && images.length > 0) {
+      const image = images.find(img => img.imageGUID === imageGUID);
+      if (image) {
+        setSelectedImageGUID(imageGUID);
+      }
+    }
+  }, [images]);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -119,10 +208,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       let data: Image[];
 
       if (selectedProject) {
-        // Load images from selected project
         data = await api.getProjectImages(selectedProject);
       } else {
-        // Load images with filters
         const filters: ImageFilters = {
           state: stateFilter,
           group: groupFilter,
@@ -161,47 +248,111 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     if (hasPendingMoves) {
       const interval = setInterval(() => {
         loadImages();
-      }, 2000); // Poll every 2 seconds
+      }, 2000);
 
       return () => clearInterval(interval);
     }
   }, [images, loadImages]);
 
-  const handleImageClick = (imageGUID: string) => {
-    setSelectedImageGUID(imageGUID);
-  };
+  // Image counts for badges
+  const imageCounts = useMemo(() => {
+    const counts = {
+      all: images.length,
+      unreviewed: 0,
+      approved: 0,
+      rejected: 0,
+      deleted: 0,
+      colors: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } as Record<number, number>,
+    };
 
-  const handleCloseModal = () => {
-    setSelectedImageGUID(null);
-  };
+    images.forEach(img => {
+      if (img.reviewed === 'no') counts.unreviewed++;
+      else if (img.status === 'approved') counts.approved++;
+      else if (img.status === 'rejected') counts.rejected++;
+      else if (img.status === 'deleted') counts.deleted++;
 
-  const handleImageUpdate = async () => {
-    await loadImages();
-    // Selection is maintained by GUID - if the image was removed,
-    // sortedImages won't contain it and selectedImage will be undefined
-  };
+      if (img.groupNumber && img.groupNumber > 0) {
+        counts.colors[img.groupNumber] = (counts.colors[img.groupNumber] || 0) + 1;
+      }
+    });
 
-  const handleNavigate = (direction: 'prev' | 'next') => {
-    if (selectedImageGUID === null) return;
-    const currentIndex = sortedImages.findIndex(img => img.imageGUID === selectedImageGUID);
-    if (currentIndex === -1) return;
+    return counts;
+  }, [images]);
 
-    if (direction === 'prev' && currentIndex > 0) {
-      setSelectedImageGUID(sortedImages[currentIndex - 1].imageGUID);
-    } else if (direction === 'next' && currentIndex < sortedImages.length - 1) {
-      setSelectedImageGUID(sortedImages[currentIndex + 1].imageGUID);
-    }
-  };
+  // Filter images by search query
+  const searchFilteredImages = useMemo(() => {
+    if (!debouncedSearch) return images;
 
-  // Update local images array when properties change (for persistence without API call)
-  const handlePropertyChange = useCallback((imageGUID: string, updates: Partial<Image>) => {
-    setImages(prevImages =>
-      prevImages.map(img =>
-        img.imageGUID === imageGUID ? { ...img, ...updates } : img
-      )
-    );
-  }, []);
+    return images.filter(img => {
+      if (fuzzyMatch(img.originalFile, debouncedSearch)) return true;
+      if (img.keywords?.some(kw => fuzzyMatch(kw, debouncedSearch))) return true;
+      if (img.description && fuzzyMatch(img.description, debouncedSearch)) return true;
+      return false;
+    });
+  }, [images, debouncedSearch]);
 
+  // Calculate date counts from filtered images
+  const dateCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    searchFilteredImages.forEach(img => {
+      const date = getImageDate(img);
+      counts[date] = (counts[date] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, count]) => ({ date, count }));
+  }, [searchFilteredImages]);
+
+  // Filter images by selected date
+  const filteredImages = useMemo(() => {
+    if (!selectedDate) return searchFilteredImages;
+    return searchFilteredImages.filter(img => getImageDate(img) === selectedDate);
+  }, [searchFilteredImages, selectedDate]);
+
+  // Group filtered images by date
+  const imagesByDate = useMemo(() => {
+    const groups: { date: string; images: Image[] }[] = [];
+    const dateMap: Record<string, Image[]> = {};
+
+    filteredImages.forEach(img => {
+      const date = getImageDate(img);
+      if (!dateMap[date]) {
+        dateMap[date] = [];
+      }
+      dateMap[date].push(img);
+    });
+
+    const sortedDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
+    sortedDates.forEach(date => {
+      const sortedImages = dateMap[date].sort((a, b) =>
+        getFilename(a.originalFile).localeCompare(getFilename(b.originalFile))
+      );
+      groups.push({ date, images: sortedImages });
+    });
+
+    return groups;
+  }, [filteredImages]);
+
+  // Flatten imagesByDate into a single sorted array
+  const sortedImages = useMemo(() => {
+    return imagesByDate.flatMap(group => group.images);
+  }, [imagesByDate]);
+
+  // Find selected image by GUID
+  const selectedImage = selectedImageGUID
+    ? sortedImages.find(img => img.imageGUID === selectedImageGUID) || null
+    : null;
+
+  // Calculate index for display purposes
+  const selectedImageIndex = selectedImageGUID
+    ? sortedImages.findIndex(img => img.imageGUID === selectedImageGUID)
+    : -1;
+  
+  const currentProject = projects.find(p => p.projectId === selectedProject);
+  const completedZips = currentProject?.zipFiles?.filter(z => z.status === 'complete') || [];
+  const isGeneratingZipForProject = currentProject?.zipFiles?.some(z => z.status === 'generating') || false;
+
+  // Notification helpers
   const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info') => {
     setNotification({ id: Date.now().toString(), message, type });
   }, []);
@@ -210,7 +361,80 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     setNotification(null);
   }, []);
 
-  const handleQuickAction = async (
+  // Update local images array when properties change
+  const handlePropertyChange = useCallback((imageGUID: string, updates: Partial<Image>) => {
+    setImages(prevImages =>
+      prevImages.map(img =>
+        img.imageGUID === imageGUID ? { ...img, ...updates } : img
+      )
+    );
+  }, []);
+
+  // Selection handlers
+  const toggleImageSelection = useCallback((imageGUID: string, index: number, event?: React.MouseEvent | KeyboardEvent) => {
+    const newSelection = new Set(selectedImages);
+    const shiftKey = event && 'shiftKey' in event && event.shiftKey;
+    const ctrlKey = event && (('ctrlKey' in event && event.ctrlKey) || ('metaKey' in event && event.metaKey));
+
+    if (shiftKey && lastSelectedIndex !== null) {
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      for (let i = start; i <= end; i++) {
+        newSelection.add(sortedImages[i].imageGUID);
+      }
+    } else if (ctrlKey) {
+      if (newSelection.has(imageGUID)) {
+        newSelection.delete(imageGUID);
+      } else {
+        newSelection.add(imageGUID);
+      }
+    } else {
+      newSelection.clear();
+      newSelection.add(imageGUID);
+    }
+
+    setSelectedImages(newSelection);
+    setLastSelectedIndex(index);
+  }, [selectedImages, lastSelectedIndex, sortedImages]);
+
+  const selectAllImages = useCallback(() => {
+    const allGuids = new Set(sortedImages.map(img => img.imageGUID));
+    setSelectedImages(allGuids);
+  }, [sortedImages]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedImages(new Set());
+    setLastSelectedIndex(null);
+    setFocusedImageIndex(null);
+  }, []);
+
+  const selectAllInDateGroup = useCallback((dateImages: Image[]) => {
+    const newSelection = new Set(selectedImages);
+    dateImages.forEach(img => newSelection.add(img.imageGUID));
+    setSelectedImages(newSelection);
+  }, [selectedImages]);
+
+  // Undo handler
+  const handleUndo = useCallback(async () => {
+    const action = undoManager.pop();
+    if (!action) {
+      showNotification('Nothing to undo', 'info');
+      return;
+    }
+
+    try {
+      for (let i = 0; i < action.imageGUIDs.length; i++) {
+        await api.updateImage(action.imageGUIDs[i], action.previousState[i] as any);
+      }
+      showNotification(`Undone: ${action.description}`, 'success');
+      loadImages();
+    } catch (error) {
+      showNotification('Failed to undo action', 'error');
+    }
+  }, [loadImages, showNotification]);
+
+  // Quick action handler with undo support
+  const handleQuickAction = useCallback(async (
     e: React.MouseEvent,
     image: Image,
     action: 'approve' | 'reject' | 'delete' | 'undelete',
@@ -221,16 +445,31 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
     const imageId = image.imageGUID;
 
-    // Check if this specific image is already being processed
     if (processingIds.has(imageId)) return;
 
-    // Add this image to processing set
     setProcessingIds(prev => new Set(prev).add(imageId));
 
-    // Determine if this action should remove the item from current view
+    const previousState: Partial<Image> = {
+      groupNumber: image.groupNumber,
+      colorCode: image.colorCode,
+      rating: image.rating,
+      status: image.status,
+      reviewed: image.reviewed,
+    };
+
     const shouldRemoveFromView = (): boolean => {
-      if (selectedProject) return false; // Don't remove from project views
-      if (stateFilter === 'all') return false; // Don't remove from 'all' view
+      if (selectedProject) return false;
+
+      if (action === 'approve' && groupNumber !== undefined && groupFilter !== 'all') {
+        if (typeof groupFilter === 'number' && groupFilter > 0 && groupNumber !== groupFilter) {
+          return true;
+        }
+        if (groupFilter === 0 && groupNumber > 0) {
+          return true;
+        }
+      }
+
+      if (stateFilter === 'all') return false;
 
       switch (action) {
         case 'approve':
@@ -246,17 +485,13 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       }
     };
 
-    // Store original image and index for potential rollback
     const originalImage = { ...image };
     const originalIndex = images.findIndex(img => img.imageGUID === imageId);
     const willRemove = shouldRemoveFromView();
 
-    // Optimistic update
     if (willRemove) {
-      // Remove from list immediately
       setImages(prev => prev.filter(img => img.imageGUID !== imageId));
     } else {
-      // Just update properties
       if (action === 'approve' && groupNumber !== undefined) {
         const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
         handlePropertyChange(imageId, { groupNumber, colorCode: colorName });
@@ -287,50 +522,40 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           reviewed: 'true',
         });
       }
-      // Success - no refresh needed, optimistic update already applied
+
+      undoManager.push({
+        id: generateUndoId(),
+        type: 'update',
+        description: `${action} image`,
+        imageGUIDs: [imageId],
+        previousState: [previousState],
+        timestamp: Date.now(),
+      });
     } catch (err: any) {
       console.error(`Failed to ${action} image:`, err);
       const errorMessage = err.response?.data?.error || `Failed to ${action} image`;
       showNotification(errorMessage, 'error');
 
-      // Rollback on error
       if (willRemove && originalIndex !== -1) {
-        // Re-insert the image at its original position
         setImages(prev => {
           const newImages = [...prev];
           newImages.splice(originalIndex, 0, originalImage);
           return newImages;
         });
       } else {
-        // Restore original properties
         handlePropertyChange(imageId, originalImage);
       }
     } finally {
-      // Remove this image from processing set
       setProcessingIds(prev => {
         const next = new Set(prev);
         next.delete(imageId);
         return next;
       });
     }
-  };
+  }, [processingIds, selectedProject, groupFilter, stateFilter, images, handlePropertyChange, showNotification]);
 
-  const handleLogout = () => {
-    authService.logout();
-    onLogout();
-  };
-
-  // Handle bulk action for all images in a date group
-  const handleDateBulkAction = async (
-    dateImages: Image[],
-    action: 'approve' | 'reject' | 'delete',
-    groupNumber?: number
-  ) => {
-    // Filter out images that are already being processed
-    const imagesToProcess = dateImages.filter(img => !processingIds.has(img.imageGUID));
-    if (imagesToProcess.length === 0) return;
-
-    // Add all images to processing set
+  // Bulk action handlers
+  const performBulkApprove = useCallback(async (imagesToProcess: Image[], groupNumber: number) => {
     const imageIds = imagesToProcess.map(img => img.imageGUID);
     setProcessingIds(prev => {
       const next = new Set(prev);
@@ -338,9 +563,200 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       return next;
     });
 
-    // Determine if this action should remove items from current view
+    const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
+
+    const previousStates = imagesToProcess.map(img => ({
+      groupNumber: img.groupNumber,
+      colorCode: img.colorCode,
+      rating: img.rating,
+      status: img.status,
+      reviewed: img.reviewed,
+    }));
+
+    imagesToProcess.forEach(img => {
+      handlePropertyChange(img.imageGUID, { groupNumber, colorCode: colorName });
+    });
+
+    const results = await Promise.allSettled(
+      imagesToProcess.map(image =>
+        api.updateImage(image.imageGUID, {
+          groupNumber,
+          colorCode: colorName,
+          promoted: false,
+          reviewed: 'true',
+        })
+      )
+    );
+
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      showNotification(`${failures.length} of ${imagesToProcess.length} images failed to approve`, 'error');
+      loadImages();
+    } else {
+      showNotification(`${imagesToProcess.length} images approved`, 'success');
+      undoManager.push({
+        id: generateUndoId(),
+        type: 'bulk',
+        description: `bulk approve ${imagesToProcess.length} images`,
+        imageGUIDs: imageIds,
+        previousState: previousStates,
+        timestamp: Date.now(),
+      });
+    }
+
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.delete(id));
+      return next;
+    });
+    clearSelection();
+  }, [handlePropertyChange, showNotification, loadImages, clearSelection]);
+
+  const handleBulkApprove = useCallback(async (groupNumber: number) => {
+    const imagesToProcess = Array.from(selectedImages)
+      .map(guid => sortedImages.find(img => img.imageGUID === guid))
+      .filter((img): img is Image => img !== undefined && !processingIds.has(img.imageGUID));
+
+    if (imagesToProcess.length === 0) return;
+
+    if (preferences.confirmOnDelete && imagesToProcess.length > 5) {
+      setConfirmDialog({
+        isOpen: true,
+        title: 'Bulk Approve',
+        message: `Are you sure you want to approve ${imagesToProcess.length} images?`,
+        confirmLabel: 'Approve All',
+        confirmVariant: 'primary',
+        onConfirm: () => performBulkApprove(imagesToProcess, groupNumber),
+      });
+    } else {
+      await performBulkApprove(imagesToProcess, groupNumber);
+    }
+  }, [selectedImages, sortedImages, processingIds, preferences.confirmOnDelete, performBulkApprove]);
+
+  const handleBulkReject = useCallback(async () => {
+    const imagesToProcess = Array.from(selectedImages)
+      .map(guid => sortedImages.find(img => img.imageGUID === guid))
+      .filter((img): img is Image => img !== undefined);
+
+    if (imagesToProcess.length === 0) return;
+
+    const imageIds = imagesToProcess.map(img => img.imageGUID);
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.add(id));
+      return next;
+    });
+
+    const results = await Promise.allSettled(
+      imagesToProcess.map(image =>
+        api.updateImage(image.imageGUID, {
+          groupNumber: 0,
+          colorCode: 'white',
+          reviewed: 'true',
+        })
+      )
+    );
+
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      showNotification(`${failures.length} of ${imagesToProcess.length} images failed to reject`, 'error');
+    } else {
+      showNotification(`${imagesToProcess.length} images rejected`, 'success');
+    }
+
+    loadImages();
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.delete(id));
+      return next;
+    });
+    clearSelection();
+  }, [selectedImages, sortedImages, showNotification, loadImages, clearSelection]);
+
+  const performBulkDelete = useCallback(async (imagesToProcess: Image[]) => {
+    const imageIds = imagesToProcess.map(img => img.imageGUID);
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.add(id));
+      return next;
+    });
+
+    const results = await Promise.allSettled(
+      imagesToProcess.map(image => api.deleteImage(image.imageGUID))
+    );
+
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      showNotification(`${failures.length} of ${imagesToProcess.length} images failed to delete`, 'error');
+    } else {
+      showNotification(`${imagesToProcess.length} images deleted`, 'success');
+    }
+
+    loadImages();
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.delete(id));
+      return next;
+    });
+    clearSelection();
+  }, [showNotification, loadImages, clearSelection]);
+
+  const handleBulkDelete = useCallback(async () => {
+    const imagesToProcess = Array.from(selectedImages)
+      .map(guid => sortedImages.find(img => img.imageGUID === guid))
+      .filter((img): img is Image => img !== undefined);
+
+    if (imagesToProcess.length === 0) return;
+
+    if (preferences.confirmOnDelete) {
+      setConfirmDialog({
+        isOpen: true,
+        title: 'Delete Images',
+        message: `Are you sure you want to delete ${imagesToProcess.length} images?`,
+        confirmLabel: 'Delete All',
+        confirmVariant: 'danger',
+        onConfirm: () => performBulkDelete(imagesToProcess),
+      });
+    } else {
+      await performBulkDelete(imagesToProcess);
+    }
+  }, [selectedImages, sortedImages, preferences.confirmOnDelete, performBulkDelete]);
+
+  const handleBulkAddToProject = useCallback(() => {
+    if (!targetProject) {
+      showNotification('Please select a project first', 'info');
+      return;
+    }
+    handleAddToProject();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetProject, showNotification]);
+
+  // Date bulk action handler
+  const handleDateBulkAction = useCallback(async (
+    dateImages: Image[],
+    action: 'approve' | 'reject' | 'delete',
+    groupNumber?: number
+  ) => {
+    const imagesToProcess = dateImages.filter(img => !processingIds.has(img.imageGUID));
+    if (imagesToProcess.length === 0) return;
+
+    const imageIds = imagesToProcess.map(img => img.imageGUID);
+    setProcessingIds(prev => {
+      const next = new Set(prev);
+      imageIds.forEach(id => next.add(id));
+      return next;
+    });
+
     const shouldRemoveFromView = (): boolean => {
       if (selectedProject) return false;
+      if (action === 'approve' && groupNumber !== undefined && groupFilter !== 'all') {
+        if (typeof groupFilter === 'number' && groupFilter > 0 && groupNumber !== groupFilter) {
+          return true;
+        }
+        if (groupFilter === 0 && groupNumber > 0) {
+          return true;
+        }
+      }
       if (stateFilter === 'all') return false;
       switch (action) {
         case 'approve':
@@ -356,7 +772,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
     const willRemove = shouldRemoveFromView();
 
-    // Optimistic update
     if (willRemove) {
       setImages(prev => prev.filter(img => !imageIds.includes(img.imageGUID)));
     } else {
@@ -370,7 +785,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       });
     }
 
-    // Process all images
     const results = await Promise.allSettled(
       imagesToProcess.map(async (image) => {
         if (action === 'delete') {
@@ -393,66 +807,88 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       })
     );
 
-    // Check for failures
     const failures = results.filter(r => r.status === 'rejected');
     if (failures.length > 0) {
       showNotification(`${failures.length} of ${imagesToProcess.length} images failed to ${action}`, 'error');
-      // Reload to get correct state
       loadImages();
     } else {
       showNotification(`${imagesToProcess.length} images ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'deleted'}`, 'success');
     }
 
-    // Remove all images from processing set
     setProcessingIds(prev => {
       const next = new Set(prev);
       imageIds.forEach(id => next.delete(id));
       return next;
     });
-  };
+  }, [processingIds, selectedProject, groupFilter, stateFilter, handlePropertyChange, showNotification, loadImages]);
 
-  // Handle star rating click on thumbnail
-  const handleThumbnailRating = async (e: React.MouseEvent, image: Image, stars: number) => {
+  // Thumbnail rating handler
+  const handleThumbnailRating = useCallback(async (e: React.MouseEvent, image: Image, stars: number) => {
     e.stopPropagation();
     e.preventDefault();
     if (processingIds.has(image.imageGUID)) return;
 
-    // Toggle off if clicking the same rating
     const newRating = image.rating === stars ? 0 : stars;
-
-    // Optimistic local update
     handlePropertyChange(image.imageGUID, { rating: newRating });
 
-    // Save to backend
     try {
       await api.updateImage(image.imageGUID, { rating: newRating });
     } catch (err) {
       console.error('Failed to update rating:', err);
-      // Revert on error
       handlePropertyChange(image.imageGUID, { rating: image.rating });
     }
-  };
+  }, [processingIds, handlePropertyChange]);
 
-  const handleProjectCreated = async (newProjectId?: string) => {
+  // Navigation handlers
+  const handleImageClick = useCallback((imageGUID: string) => {
+    setSelectedImageGUID(imageGUID);
+    updateURLState({ image: imageGUID });
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedImageGUID(null);
+    updateURLState({ image: null });
+  }, []);
+
+  const handleImageUpdate = useCallback(async () => {
+    await loadImages();
+  }, [loadImages]);
+
+  const handleNavigate = useCallback((direction: 'prev' | 'next') => {
+    if (selectedImageGUID === null) return;
+    const currentIndex = sortedImages.findIndex(img => img.imageGUID === selectedImageGUID);
+    if (currentIndex === -1) return;
+
+    if (direction === 'prev' && currentIndex > 0) {
+      const newGUID = sortedImages[currentIndex - 1].imageGUID;
+      setSelectedImageGUID(newGUID);
+      updateURLState({ image: newGUID });
+    } else if (direction === 'next' && currentIndex < sortedImages.length - 1) {
+      const newGUID = sortedImages[currentIndex + 1].imageGUID;
+      setSelectedImageGUID(newGUID);
+      updateURLState({ image: newGUID });
+    }
+  }, [selectedImageGUID, sortedImages]);
+
+  // Project handlers
+  const handleProjectCreated = useCallback(async (newProjectId?: string) => {
     await loadProjects();
-    // If a new project was created, select it in the target dropdown
     if (newProjectId) {
       setTargetProject(newProjectId);
     }
     loadImages();
-  };
+  }, [loadProjects, loadImages]);
 
-  const handleProjectChange = (projectId: string) => {
+  const handleProjectChange = useCallback((projectId: string) => {
     setSelectedProject(projectId);
-    setSelectedDate(''); // Clear date filter when changing projects
+    setSelectedDate('');
     if (projectId) {
-      // Clear filters when viewing a project
       setStateFilter('all');
       setGroupFilter('all');
     }
-  };
+  }, []);
 
-  const handleAddToProject = async () => {
+  const handleAddToProject = useCallback(async () => {
     if (!targetProject || addingToProject) return;
 
     const projectName = projects.find(p => p.projectId === targetProject)?.name || 'project';
@@ -501,16 +937,16 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } finally {
       setAddingToProject(false);
     }
-  };
+  }, [targetProject, addingToProject, projects, groupFilter, loadProjects, loadImages]);
 
-  const handleDismissTransfer = () => {
+  const handleDismissTransfer = useCallback(() => {
     setTransferProgress(prev => ({
       ...prev,
       isActive: false,
     }));
-  };
+  }, []);
 
-  const handleCreateProjectInline = async () => {
+  const handleCreateProjectInline = useCallback(async () => {
     if (!newProjectName.trim()) return;
 
     setCreatingProject(true);
@@ -528,9 +964,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } finally {
       setCreatingProject(false);
     }
-  };
+  }, [newProjectName, loadProjects, showNotification]);
 
-  const handleGenerateZip = async () => {
+  const handleGenerateZip = useCallback(async () => {
     if (!selectedProject) return;
 
     setGeneratingZip(true);
@@ -545,9 +981,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } finally {
       setGeneratingZip(false);
     }
-  };
+  }, [selectedProject, showNotification, loadProjects]);
 
-  const handleDownloadZip = async (project: Project, zipFile: ZipFile) => {
+  const handleDownloadZip = useCallback(async (project: Project, zipFile: ZipFile) => {
     const zipId = `${project.projectId}-${zipFile.key}`;
     setDownloadingZip(zipId);
     try {
@@ -564,80 +1000,209 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     } finally {
       setDownloadingZip(null);
     }
-  };
+  }, [showNotification]);
 
-  // Calculate date counts from all loaded images
-  const dateCounts = React.useMemo(() => {
-    const counts: Record<string, number> = {};
-    images.forEach(img => {
-      const date = getImageDate(img);
-      counts[date] = (counts[date] || 0) + 1;
-    });
-    // Sort dates descending (newest first)
-    return Object.entries(counts)
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([date, count]) => ({ date, count }));
-  }, [images]);
+  // UI handlers
+  const handleLogout = useCallback(() => {
+    authService.logout();
+    onLogout();
+  }, [onLogout]);
 
-  // Filter images by selected date
-  const filteredImages = React.useMemo(() => {
-    if (!selectedDate) return images;
-    return images.filter(img => getImageDate(img) === selectedDate);
-  }, [images, selectedDate]);
+  const toggleSidebar = useCallback(() => {
+    const newState = !sidebarCollapsed;
+    setSidebarCollapsed(newState);
+    savePreference('sidebarCollapsed', newState);
+  }, [sidebarCollapsed]);
 
-  // Group filtered images by date (sorted newest first), with images sorted by filename within each group
-  const imagesByDate = React.useMemo(() => {
-    const groups: { date: string; images: Image[] }[] = [];
-    const dateMap: Record<string, Image[]> = {};
+  const handleThumbnailSizeChange = useCallback((size: number) => {
+    setThumbnailSize(size);
+    savePreference('thumbnailSize', size);
+  }, []);
 
-    filteredImages.forEach(img => {
-      const date = getImageDate(img);
-      if (!dateMap[date]) {
-        dateMap[date] = [];
+  // Hover preview handlers
+  const handleThumbnailMouseEnter = useCallback((image: Image, e: React.MouseEvent) => {
+    if (!preferences.hoverPreviewEnabled) return;
+    setHoverImage(image);
+    setHoverPosition({ x: e.clientX, y: e.clientY });
+  }, [preferences.hoverPreviewEnabled]);
+
+  const handleThumbnailMouseLeave = useCallback(() => {
+    setHoverImage(null);
+  }, []);
+
+  const handleThumbnailMouseMove = useCallback((e: React.MouseEvent) => {
+    setHoverPosition({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  // Get estimated column count based on thumbnail size
+  const getColumnCount = useCallback((): number => {
+    const columnCounts: Record<number, number> = {
+      1: 8, 2: 6, 3: 4, 4: 3, 5: 2
+    };
+    return columnCounts[thumbnailSize] || 4;
+  }, [thumbnailSize]);
+
+  // Get flat index for an image
+  const getFlatIndex = useCallback((imageGUID: string): number => {
+    return sortedImages.findIndex(img => img.imageGUID === imageGUID);
+  }, [sortedImages]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
       }
-      dateMap[date].push(img);
-    });
+      if (selectedImageGUID) return;
 
-    // Sort dates descending (newest first)
-    const sortedDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
-    sortedDates.forEach(date => {
-      // Sort images within each date group by filename
-      const sortedImages = dateMap[date].sort((a, b) =>
-        getFilename(a.originalFile).localeCompare(getFilename(b.originalFile))
-      );
-      groups.push({ date, images: sortedImages });
-    });
+      const key = e.key;
 
-    return groups;
-  }, [filteredImages]);
+      if (key === '?') {
+        e.preventDefault();
+        setShowShortcutsHelp(prev => !prev);
+        return;
+      }
 
-  // Flatten imagesByDate into a single sorted array that matches display order
-  // This is the source of truth for modal navigation and click handling
-  const sortedImages = React.useMemo(() => {
-    return imagesByDate.flatMap(group => group.images);
-  }, [imagesByDate]);
+      if ((e.ctrlKey || e.metaKey) && key === 'z') {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
 
-  // Find selected image by GUID
-  const selectedImage = selectedImageGUID
-    ? sortedImages.find(img => img.imageGUID === selectedImageGUID) || null
-    : null;
+      if ((e.ctrlKey || e.metaKey) && key === 'a') {
+        e.preventDefault();
+        selectAllImages();
+        return;
+      }
 
-  // Calculate index for display purposes (e.g., "3 of 10")
-  const selectedImageIndex = selectedImageGUID
-    ? sortedImages.findIndex(img => img.imageGUID === selectedImageGUID)
-    : -1;
-  const currentProject = projects.find(p => p.projectId === selectedProject);
-  const completedZips = currentProject?.zipFiles?.filter(z => z.status === 'complete') || [];
-  const isGeneratingZipForProject = currentProject?.zipFiles?.some(z => z.status === 'generating') || false;
+      if (key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (key === 'Escape') {
+        e.preventDefault();
+        clearSelection();
+        setShowShortcutsHelp(false);
+        return;
+      }
+
+      const columnCount = getColumnCount();
+
+      if (key === 'ArrowRight' || key === 'l') {
+        e.preventDefault();
+        setFocusedImageIndex(prev =>
+          prev === null ? 0 : Math.min(prev + 1, sortedImages.length - 1)
+        );
+        return;
+      }
+
+      if (key === 'ArrowLeft' || key === 'h') {
+        e.preventDefault();
+        setFocusedImageIndex(prev =>
+          prev === null ? 0 : Math.max(prev - 1, 0)
+        );
+        return;
+      }
+
+      if (key === 'ArrowDown' || key === 'j') {
+        e.preventDefault();
+        setFocusedImageIndex(prev =>
+          prev === null ? 0 : Math.min(prev + columnCount, sortedImages.length - 1)
+        );
+        return;
+      }
+
+      if (key === 'ArrowUp' || key === 'k') {
+        e.preventDefault();
+        setFocusedImageIndex(prev =>
+          prev === null ? 0 : Math.max(prev - columnCount, 0)
+        );
+        return;
+      }
+
+      if (key === 'Home') {
+        e.preventDefault();
+        setFocusedImageIndex(0);
+        return;
+      }
+
+      if (key === 'End') {
+        e.preventDefault();
+        setFocusedImageIndex(sortedImages.length - 1);
+        return;
+      }
+
+      if (key === 'Enter' && focusedImageIndex !== null) {
+        e.preventDefault();
+        handleImageClick(sortedImages[focusedImageIndex].imageGUID);
+        return;
+      }
+
+      if (key === ' ' && focusedImageIndex !== null) {
+        e.preventDefault();
+        toggleImageSelection(sortedImages[focusedImageIndex].imageGUID, focusedImageIndex, e);
+        return;
+      }
+
+      if (key >= '1' && key <= '5' && focusedImageIndex !== null) {
+        e.preventDefault();
+        const image = sortedImages[focusedImageIndex];
+        if (image && image.status !== 'deleted') {
+          handleQuickAction({ stopPropagation: () => {}, preventDefault: () => {} } as React.MouseEvent, image, 'approve', parseInt(key));
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedImageGUID, focusedImageIndex, sortedImages, handleUndo, selectAllImages, clearSelection, toggleImageSelection, handleQuickAction, handleImageClick, getColumnCount]);
+
+  // Scroll focused image into view
+  useEffect(() => {
+    if (focusedImageIndex !== null) {
+      const element = document.querySelector(`[data-image-index="${focusedImageIndex}"]`);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [focusedImageIndex]);
 
   return (
     <div className="gallery-container">
       <ZipProgressBanner projects={projects} onComplete={loadProjects} />
       <TransferBanner progress={transferProgress} onDismiss={handleDismissTransfer} />
       <NotificationBanner notification={notification} onDismiss={dismissNotification} />
-      <aside className="sidebar">
+      <HoverPreview image={hoverImage} position={hoverPosition} delay={preferences.hoverPreviewDelay} />
+      <KeyboardShortcutsHelp isOpen={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
+      
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        confirmVariant={confirmDialog.confirmVariant}
+        onConfirm={() => {
+          confirmDialog.onConfirm();
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+        showDontAskAgain
+        onDontAskAgain={(checked) => {
+          if (checked) {
+            savePreference('confirmOnDelete', false);
+            setPreferences(prev => ({ ...prev, confirmOnDelete: false }));
+          }
+        }}
+      />
+
+      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+        <button className="sidebar-toggle" onClick={toggleSidebar} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          {sidebarCollapsed ? '>' : '<'}
+        </button>
+        
         <div className="sidebar-top">
-          <h1 className="sidebar-title">Kill Snap</h1>
+          <h1 className="sidebar-title">{sidebarCollapsed ? 'KS' : 'Kill Snap'}</h1>
 
           <div className="image-count-container">
             <span className="image-count-label">
@@ -648,212 +1213,264 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
             </span>
           </div>
 
-          <div className="sidebar-section">
-            <label className="sidebar-label">View by Date</label>
-            <select
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="sidebar-select"
-            >
-              <option value="">All Dates</option>
-              {dateCounts.map(({ date, count }) => (
-                <option key={date} value={date}>
-                  {formatDateForDisplay(date)} ({count})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="sidebar-section">
-            <label className="sidebar-label">View by Project</label>
-            <select
-              value={selectedProject}
-              onChange={(e) => handleProjectChange(e.target.value)}
-              className="sidebar-select"
-            >
-              <option value="">Inbox</option>
-              {projects.map((project) => (
-                <option key={project.projectId} value={project.projectId}>
-                  {project.name} ({project.imageCount})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {!selectedProject && (
+          {!sidebarCollapsed && (
             <>
-              <div className="sidebar-section">
-                <label className="sidebar-label">View by Status</label>
-                <select
-                  value={stateFilter}
-                  onChange={(e) => setStateFilter(e.target.value as StateFilter)}
-                  className="sidebar-select"
-                >
-                  <option value="unreviewed">Unreviewed</option>
-                  <option value="approved">Approved</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="deleted">Deleted</option>
-                  <option value="all">All</option>
-                </select>
-              </div>
-
-              <div className="sidebar-section">
-                <label className="sidebar-label">View by Group</label>
-                <div className="group-boxes-row">
-                  <button
-                    className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}
-                    onClick={() => {
-                      setGroupFilter('all');
-                      setStateFilter('unreviewed');
-                    }}
-                    title="All Groups"
-                  >
-                    All
-                  </button>
-                  <button
-                    className={`group-box group-ungrouped ${groupFilter === 0 ? 'active' : ''}`}
-                    onClick={() => {
-                      setGroupFilter(0);
-                      setStateFilter('unreviewed');
-                    }}
-                    title="Ungrouped"
-                  >
-                    Ungrouped
-                  </button>
-                </div>
-                <div className="group-boxes-row">
-                  {GROUP_COLORS.slice(1).map((group) => (
+              <div className="sidebar-section search-section">
+                <div className="search-container">
+                  <input
+                    ref={searchInputRef}
+                    id="search-input"
+                    type="text"
+                    placeholder="Search... (Press /)"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="search-input"
+                  />
+                  {searchQuery && (
                     <button
-                      key={group.number}
-                      className={`group-box ${groupFilter === group.number ? 'active' : ''}`}
-                      style={{ backgroundColor: group.color }}
-                      onClick={() => {
-                        setGroupFilter(group.number);
-                        setStateFilter('approved');
-                      }}
-                      title={group.name}
+                      className="search-clear"
+                      onClick={() => setSearchQuery('')}
+                      title="Clear search"
                     >
-                      {group.number}
+                      x
                     </button>
-                  ))}
+                  )}
                 </div>
               </div>
 
-              <div className="sidebar-divider double-margin"></div>
+              <div className="sidebar-section thumbnail-size-section">
+                <label className="sidebar-label">Thumbnail Size</label>
+                <div className="thumbnail-slider-container">
+                  <span className="slider-label-small">S</span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    value={thumbnailSize}
+                    onChange={(e) => handleThumbnailSizeChange(Number(e.target.value))}
+                    className="thumbnail-slider"
+                  />
+                  <span className="slider-label-large">L</span>
+                </div>
+              </div>
 
-              {/* Add to Project section - below color buttons */}
-              <div className="sidebar-section add-to-project-section">
+              <div className="sidebar-section">
+                <label className="sidebar-label">View by Date</label>
                 <select
-                  value={targetProject}
-                  onChange={(e) => setTargetProject(e.target.value)}
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
                   className="sidebar-select"
                 >
-                  <option value="">Select Project...</option>
-                  {projects.map((project) => (
-                    <option key={project.projectId} value={project.projectId}>
-                      {project.name}
+                  <option value="">All Dates</option>
+                  {dateCounts.map(({ date, count }) => (
+                    <option key={date} value={date}>
+                      {formatDateForDisplay(date)} ({count})
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={handleAddToProject}
-                  disabled={!targetProject || addingToProject}
-                  className="sidebar-button primary"
-                >
-                  {addingToProject ? 'Adding...' : 'Add to Project'}
-                </button>
               </div>
 
               <div className="sidebar-section">
-                <div className="projects-buttons-row">
-                  <button
-                    onClick={() => setShowAddProjectDialog(true)}
-                    className="add-project-inline-btn"
-                    title="Add new project"
-                  >
-                    Add Project
-                  </button>
+                <label className="sidebar-label">View by Project</label>
+                <select
+                  value={selectedProject}
+                  onChange={(e) => handleProjectChange(e.target.value)}
+                  className="sidebar-select"
+                >
+                  <option value="">Inbox</option>
+                  {projects.map((project) => (
+                    <option key={project.projectId} value={project.projectId}>
+                      {project.name} ({project.imageCount})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!selectedProject && (
+                <>
+                  <div className="sidebar-section">
+                    <label className="sidebar-label">View by Status</label>
+                    <select
+                      value={stateFilter}
+                      onChange={(e) => setStateFilter(e.target.value as StateFilter)}
+                      className="sidebar-select"
+                    >
+                      <option value="unreviewed">Unreviewed ({imageCounts.unreviewed})</option>
+                      <option value="approved">Approved ({imageCounts.approved})</option>
+                      <option value="rejected">Rejected ({imageCounts.rejected})</option>
+                      <option value="deleted">Deleted ({imageCounts.deleted})</option>
+                      <option value="all">All ({imageCounts.all})</option>
+                    </select>
+                  </div>
+
+                  <div className="sidebar-section">
+                    <label className="sidebar-label">View by Group</label>
+                    <div className="group-boxes-row">
+                      <button
+                        className={`group-box group-all ${groupFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => {
+                          setGroupFilter('all');
+                          setStateFilter('unreviewed');
+                        }}
+                        title="All Groups"
+                      >
+                        All
+                      </button>
+                      <button
+                        className={`group-box group-ungrouped ${groupFilter === 0 ? 'active' : ''}`}
+                        onClick={() => {
+                          setGroupFilter(0);
+                          setStateFilter('unreviewed');
+                        }}
+                        title="Ungrouped"
+                      >
+                        Ungrouped
+                      </button>
+                    </div>
+                    <div className="group-boxes-row">
+                      {GROUP_COLORS.slice(1).map((group) => (
+                        <button
+                          key={group.number}
+                          className={`group-box ${groupFilter === group.number ? 'active' : ''}`}
+                          style={{ backgroundColor: group.color }}
+                          onClick={() => {
+                            setGroupFilter(group.number);
+                            setStateFilter('approved');
+                          }}
+                          title={`${group.name} (${imageCounts.colors[group.number] || 0})`}
+                        >
+                          {group.number}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="sidebar-divider double-margin"></div>
+
+                  <div className="sidebar-section add-to-project-section">
+                    <select
+                      value={targetProject}
+                      onChange={(e) => setTargetProject(e.target.value)}
+                      className="sidebar-select"
+                    >
+                      <option value="">Select Project...</option>
+                      {projects.map((project) => (
+                        <option key={project.projectId} value={project.projectId}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleAddToProject}
+                      disabled={!targetProject || addingToProject}
+                      className="sidebar-button primary"
+                    >
+                      {addingToProject ? 'Adding...' : 'Add to Project'}
+                    </button>
+                  </div>
+
+                  <div className="sidebar-section">
+                    <div className="projects-buttons-row">
+                      <button
+                        onClick={() => setShowAddProjectDialog(true)}
+                        className="add-project-inline-btn"
+                        title="Add new project"
+                      >
+                        Add Project
+                      </button>
+                      <button
+                        onClick={() => setShowProjectModal(true)}
+                        className="manage-projects-btn"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {selectedProject && currentProject && (
+                <>
+                  <div className="sidebar-project-buttons">
+                    <button
+                      onClick={handleGenerateZip}
+                      disabled={generatingZip || isGeneratingZipForProject || currentProject.imageCount === 0}
+                      className="sidebar-button primary"
+                      title={currentProject.imageCount === 0 ? 'No images in project' : 'Generate ZIP file'}
+                    >
+                      {generatingZip || isGeneratingZipForProject ? 'Generating...' : 'Create Zip'}
+                    </button>
+                    <button
+                      onClick={() => setShowAddProjectDialog(true)}
+                      className="sidebar-button secondary"
+                    >
+                      + Add
+                    </button>
+                  </div>
+
+                  {completedZips.length > 0 && (
+                    <div className="sidebar-zip-list">
+                      <label className="sidebar-label">Downloads</label>
+                      {completedZips.map((zipFile) => {
+                        const zipId = `${currentProject.projectId}-${zipFile.key}`;
+                        const filename = zipFile.key.split('/').pop() || 'download.zip';
+                        return (
+                          <button
+                            key={zipFile.key}
+                            type="button"
+                            className="sidebar-zip-link"
+                            onClick={() => handleDownloadZip(currentProject, zipFile)}
+                            disabled={downloadingZip === zipId}
+                          >
+                            {downloadingZip === zipId ? 'Downloading...' : filename}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <button
                     onClick={() => setShowProjectModal(true)}
-                    className="manage-projects-btn"
+                    className="sidebar-button secondary"
                   >
                     Manage
                   </button>
-                </div>
-              </div>
-            </>
-          )}
-
-          {selectedProject && currentProject && (
-            <>
-              <div className="sidebar-project-buttons">
-                <button
-                  onClick={handleGenerateZip}
-                  disabled={generatingZip || isGeneratingZipForProject || currentProject.imageCount === 0}
-                  className="sidebar-button primary"
-                  title={currentProject.imageCount === 0 ? 'No images in project' : 'Generate ZIP file'}
-                >
-                  {generatingZip || isGeneratingZipForProject ? 'Generating...' : 'Create Zip'}
-                </button>
-                <button
-                  onClick={() => setShowAddProjectDialog(true)}
-                  className="sidebar-button secondary"
-                >
-                  + Add
-                </button>
-              </div>
-
-              {completedZips.length > 0 && (
-                <div className="sidebar-zip-list">
-                  <label className="sidebar-label">Downloads</label>
-                  {completedZips.map((zipFile) => {
-                    const zipId = `${currentProject.projectId}-${zipFile.key}`;
-                    const filename = zipFile.key.split('/').pop() || 'download.zip';
-                    return (
-                      <button
-                        key={zipFile.key}
-                        type="button"
-                        className="sidebar-zip-link"
-                        onClick={() => handleDownloadZip(currentProject, zipFile)}
-                        disabled={downloadingZip === zipId}
-                      >
-                        {downloadingZip === zipId ? 'Downloading...' : filename}
-                      </button>
-                    );
-                  })}
-                </div>
+                </>
               )}
-
-              <button
-                onClick={() => setShowProjectModal(true)}
-                className="sidebar-button secondary"
-              >
-                Manage
-              </button>
             </>
           )}
         </div>
 
         <div className="sidebar-bottom">
+          {!sidebarCollapsed && (
+            <button
+              className="shortcuts-help-btn"
+              onClick={() => setShowShortcutsHelp(true)}
+              title="Keyboard shortcuts (?)"
+            >
+              ? Shortcuts
+            </button>
+          )}
           <button onClick={handleLogout} className="logout-button">
-            Logout
+            {sidebarCollapsed ? 'X' : 'Logout'}
           </button>
         </div>
       </aside>
 
-      <main className="gallery-main">
-
-      {loading ? (
-        <div className="loading">Loading images...</div>
-      ) : error ? (
-        <div className="error-message">{error}</div>
-      ) : filteredImages.length === 0 ? (
-        <div className="empty-state">
-          <p>No {selectedDate ? `images for ${formatDateForDisplay(selectedDate)}` : stateFilter === 'all' ? '' : stateFilter + ' images'} found</p>
-        </div>
-      ) : (
-        <div className="gallery-sections">
-          {imagesByDate.map((dateGroup) => (
+      <main className="gallery-main" ref={galleryRef}>
+        {loading ? (
+          <PageSkeleton sections={3} />
+        ) : error ? (
+          <div className="error-message">{error}</div>
+        ) : filteredImages.length === 0 ? (
+          <EmptyState
+            filter={stateFilter}
+            selectedDate={selectedDate}
+            onAction={stateFilter === 'unreviewed' ? () => setStateFilter('approved') : undefined}
+          />
+        ) : (
+          <div className={`gallery-sections thumbnail-size-${thumbnailSize}`}>
+            {imagesByDate.map((dateGroup) => (
               <div key={dateGroup.date} className="date-section">
                 <div className="date-section-header">
                   <span className="date-section-title">
@@ -861,6 +1478,13 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                     <span className="date-section-count">({dateGroup.images.length})</span>
                   </span>
                   <div className="date-section-line"></div>
+                  <button
+                    className="date-select-all-btn"
+                    onClick={() => selectAllInDateGroup(dateGroup.images)}
+                    title="Select all in this date"
+                  >
+                    Select
+                  </button>
                   <div className="date-section-actions">
                     <div className="date-colors">
                       {GROUP_COLORS.slice(1).map((group) => (
@@ -883,7 +1507,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                         onClick={() => handleDateBulkAction(dateGroup.images, 'approve', 1)}
                         title="Approve all"
                       >
-                        ✓
+                        V
                       </button>
                       <button
                         type="button"
@@ -891,7 +1515,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                         onClick={() => handleDateBulkAction(dateGroup.images, 'reject')}
                         title="Reject all"
                       >
-                        ✗
+                        X
                       </button>
                       <button
                         type="button"
@@ -899,7 +1523,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                         onClick={() => handleDateBulkAction(dateGroup.images, 'delete')}
                         title="Delete all"
                       >
-                        🗑
+                        D
                       </button>
                     </div>
                   </div>
@@ -907,12 +1531,36 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                 <div className="gallery-grid">
                   {dateGroup.images.map((image) => {
                     const isDeleted = image.status === 'deleted';
+                    const flatIndex = getFlatIndex(image.imageGUID);
+                    const isSelected = selectedImages.has(image.imageGUID);
+                    const isFocused = focusedImageIndex === flatIndex;
+                    
                     return (
                       <div
                         key={image.imageGUID}
-                        className={`gallery-item ${processingIds.has(image.imageGUID) ? 'processing' : ''} ${isDeleted ? 'deleted' : ''}`}
-                        onClick={() => handleImageClick(image.imageGUID)}
+                        data-image-index={flatIndex}
+                        className={`gallery-item ${processingIds.has(image.imageGUID) ? 'processing' : ''} ${isDeleted ? 'deleted' : ''} ${isSelected ? 'selected' : ''} ${isFocused ? 'focused' : ''}`}
+                        onClick={(e) => {
+                          if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                            toggleImageSelection(image.imageGUID, flatIndex, e);
+                          } else {
+                            handleImageClick(image.imageGUID);
+                          }
+                        }}
+                        onMouseEnter={(e) => handleThumbnailMouseEnter(image, e)}
+                        onMouseLeave={handleThumbnailMouseLeave}
+                        onMouseMove={handleThumbnailMouseMove}
                       >
+                        <div
+                          className={`selection-checkbox ${isSelected ? 'checked' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleImageSelection(image.imageGUID, flatIndex, e);
+                          }}
+                        >
+                          {isSelected && 'V'}
+                        </div>
+                        
                         <div
                           className="thumbnail-container"
                           style={{
@@ -925,6 +1573,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                             src={api.getImageUrl(image.bucket, image.thumbnail400)}
                             alt={image.originalFile}
                             className="thumbnail"
+                            loading="lazy"
                           />
                           {(image.moveStatus === 'pending' || image.moveStatus === 'moving') && (
                             <div className="move-status-indicator">
@@ -941,14 +1590,12 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                           )}
                         </div>
                         <div className="image-info">
-                          {/* Row 1: Filename left, dimensions + size right */}
                           <div className="info-row-1">
                             <span className="thumb-filename">{getFilename(image.originalFile)}</span>
                             <span className="thumb-size-info">
-                              {image.width}×{image.height} - {formatFileSize(image.fileSize)}
+                              {image.width}x{image.height} - {formatFileSize(image.fileSize)}
                             </span>
                           </div>
-                          {/* Project name row (if image is in a project) */}
                           {image.projectId && (
                             <div className="info-row-project">
                               <span className="thumb-project-name">
@@ -956,7 +1603,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                               </span>
                             </div>
                           )}
-                          {/* Row 2: Colors left, actions center, rating right */}
                           <div className="info-row-2">
                             {isDeleted ? (
                               <button
@@ -965,7 +1611,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                                 onClick={(e) => handleQuickAction(e, image, 'undelete')}
                                 title="Undelete"
                               >
-                                ↩ Undelete
+                                Undelete
                               </button>
                             ) : (
                               <>
@@ -990,7 +1636,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                                     onClick={(e) => handleQuickAction(e, image, 'approve', image.groupNumber || 1)}
                                     title="Approve"
                                   >
-                                    ✓
+                                    V
                                   </button>
                                   <button
                                     type="button"
@@ -998,7 +1644,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                                     onClick={(e) => handleQuickAction(e, image, 'reject')}
                                     title="Reject"
                                   >
-                                    ✗
+                                    X
                                   </button>
                                   <button
                                     type="button"
@@ -1006,7 +1652,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                                     onClick={(e) => handleQuickAction(e, image, 'delete')}
                                     title="Delete"
                                   >
-                                    🗑
+                                    D
                                   </button>
                                 </div>
                                 <div
@@ -1027,7 +1673,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                                         onMouseEnter={() => setHoverRating({ imageGUID: image.imageGUID, stars: star })}
                                         title={`${star} star${star > 1 ? 's' : ''}`}
                                       >
-                                        {isFilled ? '★' : '☆'}
+                                        {isFilled ? '*' : 'o'}
                                       </button>
                                     );
                                   })}
@@ -1041,14 +1687,26 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   })}
                 </div>
               </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
       </main>
+
+      <BulkActionBar
+        selectedCount={selectedImages.size}
+        totalCount={sortedImages.length}
+        onApprove={handleBulkApprove}
+        onReject={handleBulkReject}
+        onDelete={handleBulkDelete}
+        onAddToProject={handleBulkAddToProject}
+        onClearSelection={clearSelection}
+        onSelectAll={selectAllImages}
+      />
 
       {selectedImage && (
         <ImageModal
           image={selectedImage}
+          images={sortedImages}
           onClose={handleCloseModal}
           onUpdate={handleImageUpdate}
           onNavigate={handleNavigate}
@@ -1058,6 +1716,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           hasNext={selectedImageIndex < sortedImages.length - 1}
           currentIndex={selectedImageIndex}
           totalImages={sortedImages.length}
+          showFilmstrip={preferences.showFilmstrip}
+          onFilmstripToggle={(show) => {
+            savePreference('showFilmstrip', show);
+            setPreferences(prev => ({ ...prev, showFilmstrip: show }));
+          }}
         />
       )}
 
@@ -1069,7 +1732,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         />
       )}
 
-      {/* Inline Add Project Dialog */}
       {showAddProjectDialog && (
         <div className="add-dialog-backdrop" onClick={(e) => {
           if (e.target === e.currentTarget) {

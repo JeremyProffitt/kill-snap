@@ -847,3 +847,119 @@
 .manage-projects-btn:hover {
   background: #2980b9;
 }
+
+/* Thumbnail Size Slider */
+.thumbnail-size-section {
+  margin-bottom: 0.25rem;
+}
+
+.thumbnail-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.25rem;
+}
+
+.slider-label-small,
+.slider-label-large {
+  color: #8892a6;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.thumbnail-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: #2a3a5a;
+  outline: none;
+  cursor: pointer;
+}
+
+.thumbnail-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #3498db;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.thumbnail-slider::-webkit-slider-thumb:hover {
+  background: #5dade2;
+}
+
+.thumbnail-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #3498db;
+  cursor: pointer;
+  border: none;
+}
+
+.thumbnail-slider::-moz-range-thumb:hover {
+  background: #5dade2;
+}
+
+/* Thumbnail size variations - adjust column count */
+.gallery-sections.thumbnail-size-1 .gallery-grid {
+  column-count: 8;
+}
+
+.gallery-sections.thumbnail-size-2 .gallery-grid {
+  column-count: 6;
+}
+
+.gallery-sections.thumbnail-size-3 .gallery-grid {
+  column-count: 4;
+}
+
+.gallery-sections.thumbnail-size-4 .gallery-grid {
+  column-count: 3;
+}
+
+.gallery-sections.thumbnail-size-5 .gallery-grid {
+  column-count: 2;
+}
+
+/* Responsive overrides for smaller screens */
+@media (max-width: 1400px) {
+  .gallery-sections.thumbnail-size-1 .gallery-grid {
+    column-count: 6;
+  }
+  .gallery-sections.thumbnail-size-2 .gallery-grid {
+    column-count: 5;
+  }
+  .gallery-sections.thumbnail-size-3 .gallery-grid {
+    column-count: 3;
+  }
+  .gallery-sections.thumbnail-size-4 .gallery-grid {
+    column-count: 2;
+  }
+  .gallery-sections.thumbnail-size-5 .gallery-grid {
+    column-count: 2;
+  }
+}
+
+@media (max-width: 1000px) {
+  .gallery-sections.thumbnail-size-1 .gallery-grid {
+    column-count: 4;
+  }
+  .gallery-sections.thumbnail-size-2 .gallery-grid {
+    column-count: 3;
+  }
+  .gallery-sections.thumbnail-size-3 .gallery-grid {
+    column-count: 2;
+  }
+  .gallery-sections.thumbnail-size-4 .gallery-grid {
+    column-count: 2;
+  }
+  .gallery-sections.thumbnail-size-5 .gallery-grid {
+    column-count: 1;
+  }
+}
