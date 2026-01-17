@@ -201,12 +201,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
     setAddingToProject(true);
     try {
-      // First approve the image if not already approved
-      if (image.state !== 'approved') {
-        await api.updateImage(image.imageGUID, { state: 'approved' });
-        onPropertyChange(image.imageGUID, { state: 'approved' });
-      }
-      // Add to project (single image by its group number)
+      // Add to project (single image by its GUID)
       await api.addToProject(projectId, { group: image.groupNumber || 0, imageGUID: image.imageGUID });
       const project = projects.find(p => p.projectId === projectId);
       onNotify(`Added to ${project?.name || 'project'}`, 'success');
@@ -217,7 +212,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     } finally {
       setAddingToProject(false);
     }
-  }, [addingToProject, image, projects, onPropertyChange, onNotify, onProjectsUpdate]);
+  }, [addingToProject, image, projects, onNotify, onProjectsUpdate]);
 
   const handleAddKeyword = useCallback(async () => {
     const trimmed = newKeyword.trim();
