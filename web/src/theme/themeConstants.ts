@@ -261,488 +261,488 @@ export const THEME_COLORS: ThemeColor[] = [
     background: "#150a10",
     sidebar: "#250d1a"
   },
-  // Brighter Themes (20)
+  // Light Themes (20)
   {
-    id: "bright-sky",
-    name: "Bright Sky",
-    primary: "#00bfff",
-    secondary: "#0099cc",
-    background: "#1a2530",
-    sidebar: "#253545"
+    id: "light-sky",
+    name: "Light Sky",
+    primary: "#0077cc",
+    secondary: "#005599",
+    background: "#e8f4fc",
+    sidebar: "#cce5f5"
   },
   {
-    id: "bright-lime",
-    name: "Bright Lime",
-    primary: "#7fff00",
-    secondary: "#66cc00",
-    background: "#1a2518",
-    sidebar: "#253520"
+    id: "light-mint",
+    name: "Light Mint",
+    primary: "#00a86b",
+    secondary: "#008855",
+    background: "#e8fcf2",
+    sidebar: "#c5f0dc"
   },
   {
-    id: "bright-coral",
-    name: "Bright Coral",
-    primary: "#ff7f7f",
-    secondary: "#ff5555",
-    background: "#2a1a1a",
-    sidebar: "#3a2525"
+    id: "light-coral",
+    name: "Light Coral",
+    primary: "#e05050",
+    secondary: "#cc3333",
+    background: "#fceaea",
+    sidebar: "#f5d0d0"
   },
   {
-    id: "bright-aqua",
-    name: "Bright Aqua",
-    primary: "#00ffff",
-    secondary: "#00cccc",
-    background: "#1a2828",
-    sidebar: "#253a3a"
+    id: "light-lavender",
+    name: "Light Lavender",
+    primary: "#8855cc",
+    secondary: "#6633aa",
+    background: "#f4eafc",
+    sidebar: "#e5d0f5"
   },
   {
-    id: "bright-yellow",
-    name: "Bright Yellow",
-    primary: "#ffff00",
-    secondary: "#cccc00",
-    background: "#252518",
-    sidebar: "#3a3a25"
+    id: "light-lemon",
+    name: "Light Lemon",
+    primary: "#ccaa00",
+    secondary: "#aa8800",
+    background: "#fcfce8",
+    sidebar: "#f5f0c5"
   },
   {
-    id: "bright-pink",
-    name: "Bright Pink",
-    primary: "#ff69b4",
-    secondary: "#ff1493",
-    background: "#281a25",
-    sidebar: "#3a2535"
+    id: "light-rose",
+    name: "Light Rose",
+    primary: "#dd5588",
+    secondary: "#cc3366",
+    background: "#fceaf0",
+    sidebar: "#f5d0e0"
   },
   {
-    id: "bright-mint",
-    name: "Bright Mint",
-    primary: "#98ff98",
-    secondary: "#7acc7a",
-    background: "#1a2820",
-    sidebar: "#253a2a"
+    id: "light-sage",
+    name: "Light Sage",
+    primary: "#669966",
+    secondary: "#558855",
+    background: "#f0f8f0",
+    sidebar: "#d8e8d8"
   },
   {
-    id: "bright-peach",
-    name: "Bright Peach",
-    primary: "#ffcba4",
-    secondary: "#ffb380",
-    background: "#282018",
-    sidebar: "#3a3025"
+    id: "light-peach",
+    name: "Light Peach",
+    primary: "#dd7744",
+    secondary: "#cc5522",
+    background: "#fcf0e8",
+    sidebar: "#f5dcc8"
   },
   {
-    id: "bright-lavender",
-    name: "Bright Lavender",
-    primary: "#e6e6fa",
-    secondary: "#d8bfd8",
-    background: "#201a28",
-    sidebar: "#302540"
+    id: "light-periwinkle",
+    name: "Light Periwinkle",
+    primary: "#6677cc",
+    secondary: "#4455aa",
+    background: "#eef0fc",
+    sidebar: "#d8dcf5"
   },
   {
-    id: "bright-turquoise",
-    name: "Bright Turquoise",
-    primary: "#40e0d0",
-    secondary: "#30c0b0",
-    background: "#182525",
-    sidebar: "#253838"
+    id: "light-aqua",
+    name: "Light Aqua",
+    primary: "#00aaaa",
+    secondary: "#008888",
+    background: "#e8fcfc",
+    sidebar: "#c5f0f0"
   },
   {
-    id: "electric-blue",
-    name: "Electric Blue",
-    primary: "#7df9ff",
-    secondary: "#00d4ff",
-    background: "#182028",
-    sidebar: "#253040"
+    id: "cream-blue",
+    name: "Cream Blue",
+    primary: "#3388cc",
+    secondary: "#2266aa",
+    background: "#f8f8f0",
+    sidebar: "#e8e8d8"
   },
   {
-    id: "vivid-green",
-    name: "Vivid Green",
-    primary: "#00ff7f",
-    secondary: "#00cc66",
-    background: "#18251a",
-    sidebar: "#253a28"
+    id: "cream-green",
+    name: "Cream Green",
+    primary: "#44aa66",
+    secondary: "#338855",
+    background: "#f8f8f0",
+    sidebar: "#e0e8d8"
   },
   {
-    id: "hot-magenta",
-    name: "Hot Magenta",
-    primary: "#ff00ff",
-    secondary: "#cc00cc",
-    background: "#251a25",
-    sidebar: "#3a2838"
+    id: "snow-white",
+    name: "Snow White",
+    primary: "#5577aa",
+    secondary: "#445588",
+    background: "#fafafa",
+    sidebar: "#e8e8e8"
   },
   {
-    id: "sunshine-gold",
-    name: "Sunshine Gold",
-    primary: "#ffd700",
-    secondary: "#daa520",
-    background: "#252015",
-    sidebar: "#3a3020"
+    id: "ivory-gold",
+    name: "Ivory Gold",
+    primary: "#bb8833",
+    secondary: "#996622",
+    background: "#faf8f0",
+    sidebar: "#f0e8d0"
   },
   {
-    id: "bright-violet",
-    name: "Bright Violet",
-    primary: "#ee82ee",
-    secondary: "#da70d6",
-    background: "#251a28",
-    sidebar: "#382840"
+    id: "cotton-candy",
+    name: "Cotton Candy",
+    primary: "#cc66aa",
+    secondary: "#aa4488",
+    background: "#fcf0f8",
+    sidebar: "#f5d8ec"
   },
   {
-    id: "neon-green",
-    name: "Neon Green",
-    primary: "#39ff14",
-    secondary: "#32e010",
-    background: "#151f15",
-    sidebar: "#203020"
+    id: "morning-fog",
+    name: "Morning Fog",
+    primary: "#668899",
+    secondary: "#556677",
+    background: "#f0f4f8",
+    sidebar: "#dce4e8"
   },
   {
-    id: "candy-pink",
-    name: "Candy Pink",
-    primary: "#ffb6c1",
-    secondary: "#ffa0b0",
-    background: "#281820",
-    sidebar: "#3a2530"
+    id: "vanilla-cream",
+    name: "Vanilla Cream",
+    primary: "#aa8855",
+    secondary: "#886633",
+    background: "#faf8f2",
+    sidebar: "#f0e8d8"
   },
   {
-    id: "lemon-yellow",
-    name: "Lemon Yellow",
-    primary: "#fff44f",
-    secondary: "#eedc30",
-    background: "#25251a",
-    sidebar: "#383820"
+    id: "soft-teal",
+    name: "Soft Teal",
+    primary: "#339999",
+    secondary: "#227777",
+    background: "#f0f8f8",
+    sidebar: "#d8e8e8"
   },
   {
-    id: "ice-blue",
-    name: "Ice Blue",
-    primary: "#a0d2eb",
-    secondary: "#80c2e0",
-    background: "#1a2025",
-    sidebar: "#253038"
+    id: "blush-pink",
+    name: "Blush Pink",
+    primary: "#cc7788",
+    secondary: "#aa5566",
+    background: "#fcf4f4",
+    sidebar: "#f5e0e0"
   },
   {
-    id: "spring-green",
-    name: "Spring Green",
-    primary: "#00ff7f",
-    secondary: "#00e070",
-    background: "#152018",
-    sidebar: "#203525"
+    id: "pale-jade",
+    name: "Pale Jade",
+    primary: "#55aa88",
+    secondary: "#448866",
+    background: "#f0f8f4",
+    sidebar: "#d8e8dc"
   },
-  // Orange-Based Themes (20)
+  // Orange-Based Light Themes (20)
   {
-    id: "tangerine",
-    name: "Tangerine",
-    primary: "#ff9966",
-    secondary: "#ff7744",
-    background: "#1f1510",
-    sidebar: "#2e2018"
-  },
-  {
-    id: "burnt-orange",
-    name: "Burnt Orange",
-    primary: "#cc5500",
-    secondary: "#aa4400",
-    background: "#1a1008",
-    sidebar: "#2a1810"
+    id: "light-tangerine",
+    name: "Light Tangerine",
+    primary: "#e87830",
+    secondary: "#cc6020",
+    background: "#fcf4e8",
+    sidebar: "#f5e0c8"
   },
   {
-    id: "amber-glow",
-    name: "Amber Glow",
-    primary: "#ffbf00",
-    secondary: "#e6a800",
-    background: "#1f1a0a",
-    sidebar: "#2e2810"
+    id: "light-amber",
+    name: "Light Amber",
+    primary: "#cc9000",
+    secondary: "#aa7800",
+    background: "#fcf8e8",
+    sidebar: "#f5ecc8"
   },
   {
-    id: "rust-orange",
-    name: "Rust Orange",
-    primary: "#b7410e",
-    secondary: "#8b3008",
-    background: "#18100a",
-    sidebar: "#251810"
+    id: "light-apricot",
+    name: "Light Apricot",
+    primary: "#e08050",
+    secondary: "#c86838",
+    background: "#fcf0e8",
+    sidebar: "#f5dcc8"
   },
   {
-    id: "carrot-orange",
-    name: "Carrot Orange",
-    primary: "#ed9121",
-    secondary: "#d07818",
-    background: "#1a1508",
-    sidebar: "#2a2010"
+    id: "light-pumpkin",
+    name: "Light Pumpkin",
+    primary: "#dd6620",
+    secondary: "#bb5010",
+    background: "#fcf0e0",
+    sidebar: "#f5dcc0"
   },
   {
-    id: "mango-tango",
-    name: "Mango Tango",
-    primary: "#ff8243",
-    secondary: "#e06830",
-    background: "#1f150f",
-    sidebar: "#2e2018"
+    id: "light-copper",
+    name: "Light Copper",
+    primary: "#b87040",
+    secondary: "#a06030",
+    background: "#f8f0e8",
+    sidebar: "#f0dcc8"
   },
   {
-    id: "copper-shine",
-    name: "Copper Shine",
-    primary: "#b87333",
-    secondary: "#9a5f28",
-    background: "#18120a",
-    sidebar: "#251a10"
+    id: "light-papaya",
+    name: "Light Papaya",
+    primary: "#e89040",
+    secondary: "#cc7828",
+    background: "#fcf4e4",
+    sidebar: "#f5e4c0"
   },
   {
-    id: "pumpkin-spice",
-    name: "Pumpkin Spice",
-    primary: "#ff7518",
-    secondary: "#e06010",
-    background: "#1a1208",
-    sidebar: "#2a1a10"
+    id: "light-marigold",
+    name: "Light Marigold",
+    primary: "#e8a020",
+    secondary: "#cc8810",
+    background: "#fcf8e0",
+    sidebar: "#f5ecc0"
   },
   {
-    id: "tiger-orange",
-    name: "Tiger Orange",
-    primary: "#fc6a03",
-    secondary: "#dd5500",
-    background: "#1f1008",
-    sidebar: "#2e1810"
+    id: "cream-orange",
+    name: "Cream Orange",
+    primary: "#dd7744",
+    secondary: "#c06030",
+    background: "#faf8f0",
+    sidebar: "#f0e8d8"
   },
   {
-    id: "apricot-cream",
-    name: "Apricot Cream",
-    primary: "#fbceb1",
-    secondary: "#e8b090",
-    background: "#201a15",
-    sidebar: "#302820"
+    id: "peach-light",
+    name: "Peach Light",
+    primary: "#e08060",
+    secondary: "#c86848",
+    background: "#fcf4f0",
+    sidebar: "#f5e0d8"
   },
   {
-    id: "terracotta",
-    name: "Terracotta",
-    primary: "#e2725b",
-    secondary: "#c85a45",
-    background: "#1a1210",
-    sidebar: "#281a18"
+    id: "melon-orange",
+    name: "Melon Orange",
+    primary: "#e87050",
+    secondary: "#d05838",
+    background: "#fcf0ec",
+    sidebar: "#f5dcd4"
   },
   {
-    id: "safety-orange",
-    name: "Safety Orange",
-    primary: "#ff6700",
-    secondary: "#e05500",
-    background: "#1a1008",
-    sidebar: "#2a1810"
+    id: "honey-gold",
+    name: "Honey Gold",
+    primary: "#cc9933",
+    secondary: "#aa7722",
+    background: "#f8f4e8",
+    sidebar: "#f0e4d0"
   },
   {
-    id: "persimmon",
-    name: "Persimmon",
-    primary: "#ec5800",
-    secondary: "#cc4800",
-    background: "#18100a",
-    sidebar: "#251810"
+    id: "cantaloupe",
+    name: "Cantaloupe",
+    primary: "#e89060",
+    secondary: "#d07848",
+    background: "#fcf4ec",
+    sidebar: "#f5e0d4"
   },
   {
-    id: "papaya-orange",
-    name: "Papaya Orange",
-    primary: "#ff9f00",
-    secondary: "#e08800",
-    background: "#1a150a",
-    sidebar: "#2a2010"
+    id: "sunset-cream",
+    name: "Sunset Cream",
+    primary: "#e07040",
+    secondary: "#c85828",
+    background: "#faf4f0",
+    sidebar: "#f5e4dc"
   },
   {
-    id: "clementine",
-    name: "Clementine",
-    primary: "#f28500",
-    secondary: "#d47000",
-    background: "#1a120a",
-    sidebar: "#281a10"
+    id: "marmalade-light",
+    name: "Marmalade Light",
+    primary: "#dd8030",
+    secondary: "#c06818",
+    background: "#fcf4e4",
+    sidebar: "#f5e0c4"
   },
   {
-    id: "coral-orange",
-    name: "Coral Orange",
-    primary: "#ff7f50",
-    secondary: "#e06840",
-    background: "#1f1510",
-    sidebar: "#2e2018"
+    id: "citrus-light",
+    name: "Citrus Light",
+    primary: "#e89820",
+    secondary: "#cc8010",
+    background: "#fcf8e4",
+    sidebar: "#f5ecc4"
   },
   {
-    id: "mandarin",
-    name: "Mandarin",
-    primary: "#f37a48",
-    secondary: "#d86038",
-    background: "#1a1210",
-    sidebar: "#281a15"
+    id: "butterscotch",
+    name: "Butterscotch",
+    primary: "#cc8844",
+    secondary: "#b07030",
+    background: "#f8f4e8",
+    sidebar: "#f0e4d4"
   },
   {
-    id: "autumn-orange",
-    name: "Autumn Orange",
-    primary: "#eb9605",
-    secondary: "#cc8000",
-    background: "#1a1508",
-    sidebar: "#282010"
+    id: "nectar-light",
+    name: "Nectar Light",
+    primary: "#e08840",
+    secondary: "#c87028",
+    background: "#fcf4e8",
+    sidebar: "#f5e4cc"
   },
   {
-    id: "bronze-glow",
-    name: "Bronze Glow",
-    primary: "#cd7f32",
-    secondary: "#b06a28",
-    background: "#18120a",
-    sidebar: "#251a10"
+    id: "tiger-lily",
+    name: "Tiger Lily",
+    primary: "#e06830",
+    secondary: "#cc5020",
+    background: "#fcf0e4",
+    sidebar: "#f5dcc4"
   },
   {
-    id: "desert-sand",
-    name: "Desert Sand",
-    primary: "#edc9af",
-    secondary: "#d4b090",
-    background: "#1f1a15",
-    sidebar: "#2e2820"
-  },
-  // Orange-Purple Themes (20)
-  {
-    id: "sunset-dream",
-    name: "Sunset Dream",
-    primary: "#ff6b35",
-    secondary: "#9b4dca",
-    background: "#1a1018",
-    sidebar: "#281820"
+    id: "coral-cream",
+    name: "Coral Cream",
+    primary: "#e07050",
+    secondary: "#cc5838",
+    background: "#fcf4f0",
+    sidebar: "#f5e0d8"
   },
   {
-    id: "tropical-dusk",
-    name: "Tropical Dusk",
-    primary: "#ff8c42",
-    secondary: "#8b5cf6",
-    background: "#18101a",
-    sidebar: "#251825"
+    id: "golden-peach",
+    name: "Golden Peach",
+    primary: "#dd9050",
+    secondary: "#c07838",
+    background: "#fcf4ec",
+    sidebar: "#f5e4d4"
+  },
+  // Orange-Purple Light Themes (20)
+  {
+    id: "sunset-light",
+    name: "Sunset Light",
+    primary: "#e06030",
+    secondary: "#9050b0",
+    background: "#fcf0f4",
+    sidebar: "#f5dce4"
   },
   {
-    id: "fire-orchid",
-    name: "Fire Orchid",
-    primary: "#ff5722",
-    secondary: "#ba68c8",
-    background: "#1a0f15",
-    sidebar: "#281520"
+    id: "tropical-dawn",
+    name: "Tropical Dawn",
+    primary: "#e08040",
+    secondary: "#8060c0",
+    background: "#fcf4f8",
+    sidebar: "#f5e0ec"
   },
   {
-    id: "mango-plum",
-    name: "Mango Plum",
-    primary: "#ffa726",
-    secondary: "#ab47bc",
-    background: "#1a1215",
-    sidebar: "#281a20"
+    id: "orchid-cream",
+    name: "Orchid Cream",
+    primary: "#e05030",
+    secondary: "#a860b0",
+    background: "#faf4f8",
+    sidebar: "#f5e4ec"
   },
   {
-    id: "peach-violet",
-    name: "Peach Violet",
-    primary: "#ffab91",
-    secondary: "#ce93d8",
-    background: "#1f1520",
-    sidebar: "#2e2028"
+    id: "mango-violet",
+    name: "Mango Violet",
+    primary: "#e09030",
+    secondary: "#9048a8",
+    background: "#fcf4f4",
+    sidebar: "#f5e4e8"
   },
   {
-    id: "ember-lavender",
-    name: "Ember Lavender",
-    primary: "#ff7043",
-    secondary: "#7e57c2",
-    background: "#181015",
-    sidebar: "#25181f"
+    id: "peach-lilac",
+    name: "Peach Lilac",
+    primary: "#e08050",
+    secondary: "#b088c0",
+    background: "#fcf8f8",
+    sidebar: "#f5ecf0"
   },
   {
-    id: "citrus-grape",
-    name: "Citrus Grape",
-    primary: "#ff9800",
-    secondary: "#673ab7",
-    background: "#1a1018",
-    sidebar: "#281820"
+    id: "ember-iris",
+    name: "Ember Iris",
+    primary: "#dd6040",
+    secondary: "#7050b0",
+    background: "#fcf4f8",
+    sidebar: "#f5e0e8"
   },
   {
-    id: "tangerine-amethyst",
-    name: "Tangerine Amethyst",
-    primary: "#ff6f00",
-    secondary: "#9c27b0",
-    background: "#180f18",
-    sidebar: "#251520"
+    id: "citrus-lavender",
+    name: "Citrus Lavender",
+    primary: "#e08820",
+    secondary: "#6040a8",
+    background: "#fcf4f0",
+    sidebar: "#f5e8e4"
   },
   {
-    id: "coral-mauve",
-    name: "Coral Mauve",
-    primary: "#ff8a65",
-    secondary: "#b39ddb",
-    background: "#1a1518",
-    sidebar: "#282025"
+    id: "tangerine-violet",
+    name: "Tangerine Violet",
+    primary: "#dd6800",
+    secondary: "#8830a0",
+    background: "#fcf0f0",
+    sidebar: "#f5e0e4"
   },
   {
-    id: "copper-violet",
-    name: "Copper Violet",
-    primary: "#bf6e40",
-    secondary: "#7c4dff",
-    background: "#151015",
-    sidebar: "#201820"
+    id: "coral-plum",
+    name: "Coral Plum",
+    primary: "#e07858",
+    secondary: "#a088b8",
+    background: "#fcf8f4",
+    sidebar: "#f5ece8"
   },
   {
-    id: "amber-iris",
-    name: "Amber Iris",
-    primary: "#ffc107",
-    secondary: "#9575cd",
-    background: "#1a1515",
-    sidebar: "#282020"
+    id: "amber-purple",
+    name: "Amber Purple",
+    primary: "#b86840",
+    secondary: "#7050c0",
+    background: "#f8f4f4",
+    sidebar: "#f0e8ec"
   },
   {
-    id: "nectar-bloom",
-    name: "Nectar Bloom",
-    primary: "#ffb74d",
-    secondary: "#e040fb",
-    background: "#1a1218",
-    sidebar: "#281a22"
+    id: "gold-iris",
+    name: "Gold Iris",
+    primary: "#ccaa20",
+    secondary: "#8870b8",
+    background: "#fcf8f4",
+    sidebar: "#f5ece8"
   },
   {
-    id: "rust-magenta",
-    name: "Rust Magenta",
-    primary: "#bf360c",
-    secondary: "#d81b60",
-    background: "#150a10",
-    sidebar: "#201015"
+    id: "nectar-violet",
+    name: "Nectar Violet",
+    primary: "#e0a048",
+    secondary: "#b050d0",
+    background: "#fcf8f8",
+    sidebar: "#f5ecf0"
   },
   {
-    id: "pumpkin-orchid",
-    name: "Pumpkin Orchid",
-    primary: "#ef6c00",
-    secondary: "#8e24aa",
-    background: "#180f15",
-    sidebar: "#251520"
+    id: "terra-magenta",
+    name: "Terra Magenta",
+    primary: "#b04818",
+    secondary: "#c03068",
+    background: "#f8f0f0",
+    sidebar: "#f0e4e4"
   },
   {
-    id: "marmalade-plum",
-    name: "Marmalade Plum",
-    primary: "#fb8c00",
-    secondary: "#6a1b9a",
-    background: "#1a1015",
-    sidebar: "#28181f"
+    id: "pumpkin-lavender",
+    name: "Pumpkin Lavender",
+    primary: "#d86000",
+    secondary: "#7830a0",
+    background: "#fcf4f4",
+    sidebar: "#f5e4e8"
   },
   {
-    id: "burnt-lilac",
-    name: "Burnt Lilac",
-    primary: "#e65100",
-    secondary: "#aa00ff",
-    background: "#150a15",
-    sidebar: "#201020"
+    id: "marmalade-violet",
+    name: "Marmalade Violet",
+    primary: "#e08000",
+    secondary: "#5828a0",
+    background: "#fcf4f0",
+    sidebar: "#f5e4e4"
   },
   {
-    id: "spice-violet",
-    name: "Spice Violet",
-    primary: "#f57c00",
-    secondary: "#5e35b1",
-    background: "#181018",
-    sidebar: "#251822"
+    id: "spice-lilac",
+    name: "Spice Lilac",
+    primary: "#d06000",
+    secondary: "#9020d0",
+    background: "#fcf0f4",
+    sidebar: "#f5e0e8"
   },
   {
-    id: "apricot-purple",
-    name: "Apricot Purple",
-    primary: "#ffcc80",
-    secondary: "#d500f9",
-    background: "#1a1518",
-    sidebar: "#282025"
+    id: "papaya-plum",
+    name: "Papaya Plum",
+    primary: "#dd7000",
+    secondary: "#5038a8",
+    background: "#fcf4f8",
+    sidebar: "#f5e4ec"
   },
   {
-    id: "tiger-iris",
-    name: "Tiger Iris",
-    primary: "#ff5722",
-    secondary: "#651fff",
-    background: "#180a15",
-    sidebar: "#251020"
+    id: "apricot-mauve",
+    name: "Apricot Mauve",
+    primary: "#e0a070",
+    secondary: "#b020d0",
+    background: "#fcf8f8",
+    sidebar: "#f5ecf0"
   },
   {
-    id: "harvest-twilight",
-    name: "Harvest Twilight",
-    primary: "#ff9e80",
-    secondary: "#ea80fc",
-    background: "#1f1520",
-    sidebar: "#2e2030"
+    id: "tiger-violet",
+    name: "Tiger Violet",
+    primary: "#e05030",
+    secondary: "#5830d0",
+    background: "#fcf4f8",
+    sidebar: "#f5e0ec"
+  },
+  {
+    id: "harvest-bloom",
+    name: "Harvest Bloom",
+    primary: "#e08868",
+    secondary: "#c870d8",
+    background: "#fcf8f8",
+    sidebar: "#f5f0f4"
   }
 ];
 
