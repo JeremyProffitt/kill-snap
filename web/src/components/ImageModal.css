@@ -314,6 +314,39 @@
   cursor: not-allowed;
 }
 
+/* Add to Project dropdown */
+.add-to-project-dropdown {
+  display: flex;
+  align-items: center;
+}
+
+.project-select {
+  padding: 0.35rem 0.5rem;
+  background: #16213e;
+  border: 1px solid #3498db;
+  border-radius: 5px;
+  color: #fff;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.project-select:hover:not(:disabled) {
+  border-color: #2980b9;
+  background: #1a2a4a;
+}
+
+.project-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: #3a4a6a;
+}
+
+.project-select option {
+  background: #16213e;
+  color: #fff;
+}
+
 .rating-stars {
   display: flex;
   gap: 0.1rem;

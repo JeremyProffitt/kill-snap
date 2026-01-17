@@ -61,4 +61,5 @@ export interface ZipFile {
 export interface AddToProjectRequest {
   all?: boolean;
   group?: number;
+  imageGUID?: string;
 }

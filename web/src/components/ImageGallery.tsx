@@ -1726,11 +1726,13 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         <ImageModal
           image={selectedImage}
           images={sortedImages}
+          projects={projects}
           onClose={handleCloseModal}
           onUpdate={handleImageUpdate}
           onNavigate={handleNavigate}
           onPropertyChange={handlePropertyChange}
           onNotify={showNotification}
+          onProjectsUpdate={loadProjects}
           hasPrev={selectedImageIndex > 0}
           hasNext={selectedImageIndex < sortedImages.length - 1}
           currentIndex={selectedImageIndex}

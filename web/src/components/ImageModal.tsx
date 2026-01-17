@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
-import { Image } from '../types';
+import { Image, Project } from '../types';
 import { Filmstrip } from './Filmstrip';
 import './ImageModal.css';
 
 interface ImageModalProps {
   image: Image;
   images: Image[];
+  projects: Project[];
   onClose: () => void;
   onUpdate: () => void;
   onNavigate: (direction: 'prev' | 'next') => void;
   onPropertyChange: (imageGUID: string, updates: Partial<Image>) => void;
   onNotify: (message: string, type: 'success' | 'error' | 'info') => void;
+  onProjectsUpdate: () => void;
   hasPrev: boolean;
   hasNext: boolean;
   currentIndex: number;
@@ -41,11 +43,13 @@ const getFilename = (path: string): string => {
 export const ImageModal: React.FC<ImageModalProps> = ({
   image,
   images,
+  projects,
   onClose,
   onUpdate,
   onNavigate,
   onPropertyChange,
   onNotify,
+  onProjectsUpdate,
   hasPrev,
   hasNext,
   currentIndex,
@@ -59,7 +63,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   const [regeneratingAI, setRegeneratingAI] = useState(false);
   const [description, setDescription] = useState<string>('');
   const [hoverRating, setHoverRating] = useState<number | null>(null);
-  
+  const [addingToProject, setAddingToProject] = useState(false);
+
   // Zoom and pan state
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -190,6 +195,29 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       }
     }
   }, [loading, image.imageGUID, onPropertyChange]);
+
+  const handleAddToProject = useCallback(async (projectId: string) => {
+    if (!projectId || addingToProject) return;
+
+    setAddingToProject(true);
+    try {
+      // First approve the image if not already approved
+      if (image.state !== 'approved') {
+        await api.updateImage(image.imageGUID, { state: 'approved' });
+        onPropertyChange(image.imageGUID, { state: 'approved' });
+      }
+      // Add to project (single image by its group number)
+      await api.addToProject(projectId, { group: image.groupNumber || 0, imageGUID: image.imageGUID });
+      const project = projects.find(p => p.projectId === projectId);
+      onNotify(`Added to ${project?.name || 'project'}`, 'success');
+      onProjectsUpdate();
+    } catch (err: any) {
+      const message = err.response?.data?.error || 'Failed to add to project';
+      onNotify(message, 'error');
+    } finally {
+      setAddingToProject(false);
+    }
+  }, [addingToProject, image, projects, onPropertyChange, onNotify, onProjectsUpdate]);
 
   const handleAddKeyword = useCallback(async () => {
     const trimmed = newKeyword.trim();
@@ -459,6 +487,21 @@ export const ImageModal: React.FC<ImageModalProps> = ({
                     {group.number}
                   </button>
                 ))}
+              </div>
+              <div className="add-to-project-dropdown">
+                <select
+                  value=""
+                  onChange={(e) => handleAddToProject(e.target.value)}
+                  disabled={loading || addingToProject || projects.length === 0}
+                  className="project-select"
+                >
+                  <option value="">{addingToProject ? 'Adding...' : 'Add to Project'}</option>
+                  {projects.map((project) => (
+                    <option key={project.projectId} value={project.projectId}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="rating-stars" onMouseLeave={() => setHoverRating(null)}>
                 {[1, 2, 3, 4, 5].map((star) => {

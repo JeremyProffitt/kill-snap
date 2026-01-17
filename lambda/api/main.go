@@ -146,8 +146,9 @@ type UpdateProjectRequest struct {
 }
 
 type AddToProjectRequest struct {
-	All   bool `json:"all,omitempty"`
-	Group int  `json:"group,omitempty"`
+	All       bool   `json:"all,omitempty"`
+	Group     int    `json:"group,omitempty"`
+	ImageGUID string `json:"imageGUID,omitempty"`
 }
 
 // AsyncMoveRequest is used for async Lambda invocation to move files
@@ -1919,37 +1920,54 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 	var project Project
 	dynamodbattribute.UnmarshalMap(projResult.Item, &project)
 
-	// Query approved images (Status = 'approved')
-	queryInput := &dynamodb.QueryInput{
-		TableName:              aws.String(imageTable),
-		IndexName:              aws.String("StatusIndex"),
-		KeyConditionExpression: aws.String("#status = :status"),
-		ExpressionAttributeNames: map[string]*string{
-			"#status": aws.String("Status"),
-		},
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":status": {S: aws.String("approved")},
-		},
-	}
+	var imagesToProcess []map[string]*dynamodb.AttributeValue
 
-	// Add group filter if not "all"
-	if !req.All && req.Group > 0 {
-		queryInput.FilterExpression = aws.String("GroupNumber = :group")
-		queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{
-			N: aws.String(fmt.Sprintf("%d", req.Group)),
+	// If a specific imageGUID is provided, add just that image
+	if req.ImageGUID != "" {
+		imgResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(req.ImageGUID)},
+			},
+		})
+		if err != nil || imgResult.Item == nil {
+			return errorResponse(404, "Image not found", headers)
 		}
-	}
+		imagesToProcess = append(imagesToProcess, imgResult.Item)
+	} else {
+		// Query approved images (Status = 'approved')
+		queryInput := &dynamodb.QueryInput{
+			TableName:              aws.String(imageTable),
+			IndexName:              aws.String("StatusIndex"),
+			KeyConditionExpression: aws.String("#status = :status"),
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":status": {S: aws.String("approved")},
+			},
+		}
 
-	result, err := ddbClient.Query(queryInput)
-	if err != nil {
-		fmt.Printf("Error querying approved images: %v\n", err)
-		return errorResponse(500, "Failed to query images", headers)
+		// Add group filter if not "all"
+		if !req.All && req.Group > 0 {
+			queryInput.FilterExpression = aws.String("GroupNumber = :group")
+			queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{
+				N: aws.String(fmt.Sprintf("%d", req.Group)),
+			}
+		}
+
+		result, err := ddbClient.Query(queryInput)
+		if err != nil {
+			fmt.Printf("Error querying approved images: %v\n", err)
+			return errorResponse(500, "Failed to query images", headers)
+		}
+		imagesToProcess = result.Items
 	}
 
 	// Move each image to project folder using sanitized S3 prefix
 	s3Prefix := getProjectS3Prefix(project)
 	movedCount := 0
-	for _, item := range result.Items {
+	for _, item := range imagesToProcess {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
 
