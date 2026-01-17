@@ -141,6 +141,42 @@
   box-shadow: none;
 }
 
+.rename-project-btn {
+  width: 100px;
+  padding: 0.75rem 0;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f39c12 0%, #d68910 100%);
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  text-align: center;
+  box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.rename-project-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f5b041 0%, #f39c12 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(243, 156, 18, 0.5);
+}
+
+.rename-project-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(243, 156, 18, 0.4);
+}
+
+.rename-project-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .project-btn {
   padding: 0.875rem;
   border: none;
@@ -741,7 +777,8 @@
     flex-direction: column;
   }
 
-  .add-project-btn {
+  .add-project-btn,
+  .rename-project-btn {
     width: 100%;
   }
 }

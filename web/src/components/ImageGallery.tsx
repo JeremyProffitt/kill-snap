@@ -8,14 +8,15 @@ import { TransferBanner, TransferProgress } from './TransferBanner';
 import { ZipProgressBanner } from './ZipProgressBanner';
 import { NotificationBanner, Notification } from './NotificationBanner';
 import { BulkActionBar } from './BulkActionBar';
-import { HoverPreview } from './HoverPreview';
 import { ConfirmDialog } from './ConfirmDialog';
 import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
+import { ThemeSettings } from './ThemeSettings';
 import { EmptyState } from './EmptyState';
 import { PageSkeleton } from './SkeletonLoader';
-import { getPreferences, savePreference, UserPreferences } from '../services/preferences';
+import { getPreferences, savePreference, savePreferences, UserPreferences } from '../services/preferences';
 import { undoManager, generateUndoId } from '../services/undoManager';
 import { saveScrollPosition, restoreScrollPosition, updateURLState, getURLParam } from '../services/sessionStorage';
+import { THEME_COLORS } from '../theme/themeConstants';
 import './ImageGallery.css';
 
 interface ImageGalleryProps {
@@ -131,11 +132,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [focusedImageIndex, setFocusedImageIndex] = useState<number | null>(null);
-  
-  // Hover preview state
-  const [hoverImage, setHoverImage] = useState<Image | null>(null);
-  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
-  
+
   // Confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -148,6 +145,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   
   // Keyboard shortcuts help
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+
+  // Theme settings
+  const [showThemeSettings, setShowThemeSettings] = useState(false);
   
   // Transfer and notification state
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
@@ -169,6 +169,21 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Apply theme colors as CSS variables
+  useEffect(() => {
+    const color = THEME_COLORS.find(c => c.id === preferences.themeColor) || THEME_COLORS[0];
+    document.documentElement.style.setProperty('--theme-primary', color.primary);
+    document.documentElement.style.setProperty('--theme-secondary', color.secondary);
+    document.documentElement.style.setProperty('--theme-background', color.background);
+    document.documentElement.style.setProperty('--theme-sidebar', color.sidebar);
+  }, [preferences.themeColor]);
+
+  // Theme change handler
+  const handleThemeChange = useCallback((colorId: string, styleId: string) => {
+    savePreferences({ themeColor: colorId, themeStyle: styleId });
+    setPreferences(prev => ({ ...prev, themeColor: colorId, themeStyle: styleId }));
+  }, []);
 
   // Save scroll position before unload
   useEffect(() => {
@@ -1019,21 +1034,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     savePreference('thumbnailSize', size);
   }, []);
 
-  // Hover preview handlers
-  const handleThumbnailMouseEnter = useCallback((image: Image, e: React.MouseEvent) => {
-    if (!preferences.hoverPreviewEnabled) return;
-    setHoverImage(image);
-    setHoverPosition({ x: e.clientX, y: e.clientY });
-  }, [preferences.hoverPreviewEnabled]);
-
-  const handleThumbnailMouseLeave = useCallback(() => {
-    setHoverImage(null);
-  }, []);
-
-  const handleThumbnailMouseMove = useCallback((e: React.MouseEvent) => {
-    setHoverPosition({ x: e.clientX, y: e.clientY });
-  }, []);
-
   // Get estimated column count based on thumbnail size
   const getColumnCount = useCallback((): number => {
     const columnCounts: Record<number, number> = {
@@ -1173,8 +1173,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       <ZipProgressBanner projects={projects} onComplete={loadProjects} />
       <TransferBanner progress={transferProgress} onDismiss={handleDismissTransfer} />
       <NotificationBanner notification={notification} onDismiss={dismissNotification} />
-      <HoverPreview image={hoverImage} position={hoverPosition} delay={preferences.hoverPreviewDelay} />
       <KeyboardShortcutsHelp isOpen={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
+      <ThemeSettings
+        isOpen={showThemeSettings}
+        onClose={() => setShowThemeSettings(false)}
+        currentColorId={preferences.themeColor}
+        currentStyleId={preferences.themeStyle}
+        onThemeChange={handleThemeChange}
+      />
       
       <ConfirmDialog
         isOpen={confirmDialog.isOpen}
@@ -1197,12 +1203,28 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       />
 
       <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        <button className="sidebar-toggle" onClick={toggleSidebar} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-          {sidebarCollapsed ? '>' : '<'}
-        </button>
-        
         <div className="sidebar-top">
-          <h1 className="sidebar-title">{sidebarCollapsed ? 'KS' : 'Kill Snap'}</h1>
+          <div className="sidebar-header">
+            <div className="sidebar-header-buttons">
+              <button
+                className="sidebar-toggle-btn"
+                onClick={toggleSidebar}
+                title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {sidebarCollapsed ? '»' : '«'}
+              </button>
+              {!sidebarCollapsed && (
+                <button
+                  className="shortcuts-btn"
+                  onClick={() => setShowShortcutsHelp(true)}
+                  title="Keyboard shortcuts (?)"
+                >
+                  ⌨
+                </button>
+              )}
+            </div>
+            <h1 className="sidebar-title">{sidebarCollapsed ? 'KS' : 'Kill Snap'}</h1>
+          </div>
 
           <div className="image-count-container">
             <span className="image-count-label">
@@ -1444,11 +1466,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         <div className="sidebar-bottom">
           {!sidebarCollapsed && (
             <button
-              className="shortcuts-help-btn"
-              onClick={() => setShowShortcutsHelp(true)}
-              title="Keyboard shortcuts (?)"
+              className="settings-btn"
+              onClick={() => setShowThemeSettings(true)}
+              title="Appearance settings"
             >
-              ? Shortcuts
+              Appearance
             </button>
           )}
           <button onClick={handleLogout} className="logout-button">
@@ -1473,18 +1495,20 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
             {imagesByDate.map((dateGroup) => (
               <div key={dateGroup.date} className="date-section">
                 <div className="date-section-header">
-                  <span className="date-section-title">
-                    {formatDateForDisplay(dateGroup.date)}
-                    <span className="date-section-count">({dateGroup.images.length})</span>
-                  </span>
+                  <div className="date-title-container">
+                    <span className="date-section-title">
+                      {formatDateForDisplay(dateGroup.date)}
+                      <span className="date-section-count">({dateGroup.images.length})</span>
+                    </span>
+                    <button
+                      className="date-select-all-btn"
+                      onClick={() => selectAllInDateGroup(dateGroup.images)}
+                      title="Select all in this date"
+                    >
+                      Select All
+                    </button>
+                  </div>
                   <div className="date-section-line"></div>
-                  <button
-                    className="date-select-all-btn"
-                    onClick={() => selectAllInDateGroup(dateGroup.images)}
-                    title="Select all in this date"
-                  >
-                    Select
-                  </button>
                   <div className="date-section-actions">
                     <div className="date-colors">
                       {GROUP_COLORS.slice(1).map((group) => (
@@ -1547,9 +1571,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                             handleImageClick(image.imageGUID);
                           }
                         }}
-                        onMouseEnter={(e) => handleThumbnailMouseEnter(image, e)}
-                        onMouseLeave={handleThumbnailMouseLeave}
-                        onMouseMove={handleThumbnailMouseMove}
                       >
                         <div
                           className={`selection-checkbox ${isSelected ? 'checked' : ''}`}
@@ -1716,11 +1737,6 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           hasNext={selectedImageIndex < sortedImages.length - 1}
           currentIndex={selectedImageIndex}
           totalImages={sortedImages.length}
-          showFilmstrip={preferences.showFilmstrip}
-          onFilmstripToggle={(show) => {
-            savePreference('showFilmstrip', show);
-            setPreferences(prev => ({ ...prev, showFilmstrip: show }));
-          }}
         />
       )}
 

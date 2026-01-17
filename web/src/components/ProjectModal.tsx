@@ -46,6 +46,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renamingProject, setRenamingProject] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
     isActive: false,
     currentFile: '',
@@ -271,6 +274,38 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
+  const handleRenameProject = async () => {
+    if (!selectedProject || !renameValue.trim()) return;
+
+    setRenamingProject(true);
+    try {
+      await api.renameProject(selectedProject, renameValue.trim());
+      setRenameValue('');
+      setShowRenameDialog(false);
+      await onProjectCreated();
+    } catch (err: any) {
+      console.error('Failed to rename project:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to rename project';
+      alert(`Error: ${errorMsg}`);
+    } finally {
+      setRenamingProject(false);
+    }
+  };
+
+  const openRenameDialog = () => {
+    if (currentProject) {
+      setRenameValue(currentProject.name);
+      setShowRenameDialog(true);
+    }
+  };
+
+  const handleRenameDialogBackdrop = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      setShowRenameDialog(false);
+      setRenameValue('');
+    }
+  };
+
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -412,6 +447,15 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   >
                     + Add
                   </button>
+                  <button
+                    type="button"
+                    className="rename-project-btn"
+                    onClick={openRenameDialog}
+                    disabled={loading || !selectedProject}
+                    title="Rename project"
+                  >
+                    Rename
+                  </button>
                 </div>
                 {currentProject && (
                   <div className="project-info-row">
@@ -517,6 +561,45 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 disabled={creatingProject || !newProjectName.trim()}
               >
                 {creatingProject ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Project Dialog */}
+      {showRenameDialog && (
+        <div className="add-dialog-backdrop" onClick={handleRenameDialogBackdrop}>
+          <div className="add-dialog">
+            <h3>Rename Project</h3>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              placeholder="Enter new project name..."
+              disabled={renamingProject}
+              onKeyDown={(e) => e.key === 'Enter' && handleRenameProject()}
+              autoFocus
+            />
+            <div className="add-dialog-buttons">
+              <button
+                type="button"
+                className="dialog-btn cancel"
+                onClick={() => {
+                  setShowRenameDialog(false);
+                  setRenameValue('');
+                }}
+                disabled={renamingProject}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="dialog-btn create"
+                onClick={handleRenameProject}
+                disabled={renamingProject || !renameValue.trim()}
+              >
+                {renamingProject ? 'Renaming...' : 'Rename'}
               </button>
             </div>
           </div>

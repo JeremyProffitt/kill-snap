@@ -31,12 +31,48 @@
   border-top: 1px solid #2a3a5a;
 }
 
+/* Sidebar header with toggle and shortcuts buttons */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.25rem;
+}
+
+.sidebar-header-buttons {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-btn,
+.shortcuts-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: #2a3a5a;
+  color: #8892a6;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.sidebar-toggle-btn:hover,
+.shortcuts-btn:hover {
+  background: #3a4a6a;
+  color: #fff;
+}
+
 .sidebar-title {
   margin: 0;
   font-size: 1.1rem;
   color: #fff;
   text-align: center;
-  padding-bottom: 0.25rem;
+  flex: 1;
 }
 
 .sidebar-section {
@@ -248,6 +284,13 @@
   padding: 0 0.5rem;
 }
 
+.date-title-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .date-section-line {
   flex: 1;
   height: 1px;
@@ -267,6 +310,25 @@
   font-size: 0.85rem;
   font-weight: 400;
   margin-left: 0.5rem;
+}
+
+.date-select-all-btn {
+  width: 100px;
+  padding: 0.25rem 0.5rem;
+  background: #2a3a5a;
+  color: #a8b8d8;
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.date-select-all-btn:hover {
+  background: #3a4a6a;
+  color: #fff;
+  border-color: #4a5a7a;
 }
 
 .date-section-actions {
@@ -962,4 +1024,57 @@
   .gallery-sections.thumbnail-size-5 .gallery-grid {
     column-count: 1;
   }
+}
+
+/* Settings button in sidebar */
+.settings-btn {
+  padding: 0.5rem;
+  background: #2a3a5a;
+  color: #8892a6;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.15s;
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.settings-btn:hover {
+  background: #3a4a6a;
+  color: #fff;
+}
+
+/* CSS Variables for theming */
+:root {
+  --theme-primary: #3498db;
+  --theme-secondary: #2980b9;
+  --theme-background: #0f0f1a;
+  --theme-sidebar: #1a1a2e;
+}
+
+/* Apply theme colors */
+.gallery-container {
+  background: var(--theme-background);
+}
+
+.sidebar {
+  background: var(--theme-sidebar);
+}
+
+.sidebar-button.primary {
+  background: var(--theme-primary);
+}
+
+.sidebar-button.primary:hover:not(:disabled) {
+  background: var(--theme-secondary);
+}
+
+.image-count-number {
+  color: var(--theme-primary);
+}
+
+.image-count-container {
+  background: rgba(var(--theme-primary), 0.1);
 }

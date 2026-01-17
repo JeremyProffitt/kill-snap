@@ -3,7 +3,7 @@ import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
 import { Image, UpdateImageRequest, Project, AddToProjectRequest } from '../types';
 
-const RETRY_DELAYS = [250, 500, 1000]; // Quarter, half, and one second
+const RETRY_DELAYS = [300, 600, 1200, 2400]; // Exponential backoff for throttling
 
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastError: Error | undefined;
@@ -58,9 +58,11 @@ export const api = {
       ? `${API_BASE_URL}/api/images?${queryString}`
       : `${API_BASE_URL}/api/images`;
 
-    const response = await axios.get<Image[]>(url, {
-      headers: authService.getAuthHeader(),
-    });
+    const response = await withRetry(() =>
+      axios.get<Image[]>(url, {
+        headers: authService.getAuthHeader(),
+      })
+    );
     return response.data;
   },
 
@@ -94,9 +96,11 @@ export const api = {
   },
 
   async getDownloadUrl(imageId: string): Promise<string> {
-    const response = await axios.get<{ url: string }>(
-      `${API_BASE_URL}/api/images/${imageId}/download`,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.get<{ url: string }>(
+        `${API_BASE_URL}/api/images/${imageId}/download`,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data.url;
   },
@@ -110,18 +114,22 @@ export const api = {
   },
 
   async getProjects(): Promise<Project[]> {
-    const response = await axios.get<Project[]>(
-      `${API_BASE_URL}/api/projects`,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.get<Project[]>(
+        `${API_BASE_URL}/api/projects`,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
 
   async createProject(name: string): Promise<Project> {
-    const response = await axios.post<Project>(
-      `${API_BASE_URL}/api/projects`,
-      { name },
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.post<Project>(
+        `${API_BASE_URL}/api/projects`,
+        { name },
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
@@ -144,9 +152,11 @@ export const api = {
     if (!filters.all && filters.group !== undefined) {
       params.append('group', String(filters.group));
     }
-    const response = await axios.get<Image[]>(
-      `${API_BASE_URL}/api/images?${params.toString()}`,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.get<Image[]>(
+        `${API_BASE_URL}/api/images?${params.toString()}`,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
@@ -192,9 +202,11 @@ export const api = {
   },
 
   async getProjectImages(projectId: string): Promise<Image[]> {
-    const response = await axios.get<Image[]>(
-      `${API_BASE_URL}/api/projects/${projectId}/images`,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.get<Image[]>(
+        `${API_BASE_URL}/api/projects/${projectId}/images`,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
@@ -211,47 +223,99 @@ export const api = {
   },
 
   async generateZip(projectId: string): Promise<void> {
-    await axios.post(
-      `${API_BASE_URL}/api/projects/${projectId}/generate-zip`,
-      {},
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.post(
+        `${API_BASE_URL}/api/projects/${projectId}/generate-zip`,
+        {},
+        { headers: authService.getAuthHeader() }
+      )
     );
   },
 
   async getZipDownload(projectId: string, zipKey: string): Promise<{ url: string; filename: string; size: number }> {
-    const response = await axios.get<{ url: string; filename: string; size: number }>(
-      `${API_BASE_URL}/api/projects/${projectId}/zips/${encodeURIComponent(zipKey)}/download`,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.get<{ url: string; filename: string; size: number }>(
+        `${API_BASE_URL}/api/projects/${projectId}/zips/${encodeURIComponent(zipKey)}/download`,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
 
   async getZipLogs(projectId: string): Promise<{ status: string; message: string; errorMessages?: string[]; elapsedMins?: number }> {
-    const response = await axios.get<{ status: string; message: string; errorMessages?: string[]; elapsedMins?: number }>(
-      `${API_BASE_URL}/api/projects/${projectId}/zip-logs`,
-      { headers: authService.getAuthHeader() }
+    const response = await withRetry(() =>
+      axios.get<{ status: string; message: string; errorMessages?: string[]; elapsedMins?: number }>(
+        `${API_BASE_URL}/api/projects/${projectId}/zip-logs`,
+        { headers: authService.getAuthHeader() }
+      )
     );
     return response.data;
   },
 
   async deleteZip(projectId: string, zipKey: string): Promise<void> {
-    await axios.delete(
-      `${API_BASE_URL}/api/projects/${projectId}/zips/${encodeURIComponent(zipKey)}`,
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.delete(
+        `${API_BASE_URL}/api/projects/${projectId}/zips/${encodeURIComponent(zipKey)}`,
+        { headers: authService.getAuthHeader() }
+      )
     );
   },
 
   async deleteAllZips(projectId: string): Promise<void> {
-    await axios.delete(
-      `${API_BASE_URL}/api/projects/${projectId}/zips`,
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.delete(
+        `${API_BASE_URL}/api/projects/${projectId}/zips`,
+        { headers: authService.getAuthHeader() }
+      )
     );
   },
 
   async deleteProject(projectId: string): Promise<void> {
-    await axios.delete(
-      `${API_BASE_URL}/api/projects/${projectId}`,
-      { headers: authService.getAuthHeader() }
+    await withRetry(() =>
+      axios.delete(
+        `${API_BASE_URL}/api/projects/${projectId}`,
+        { headers: authService.getAuthHeader() }
+      )
     );
+  },
+
+  async renameProject(projectId: string, name: string): Promise<void> {
+    await withRetry(() =>
+      axios.put(
+        `${API_BASE_URL}/api/projects/${projectId}`,
+        { name },
+        { headers: authService.getAuthHeader() }
+      )
+    );
+  },
+
+  async getUserSettings(): Promise<{ themeColor: string; themeStyle: string }> {
+    try {
+      const response = await withRetry(() =>
+        axios.get<{ themeColor: string; themeStyle: string }>(
+          `${API_BASE_URL}/api/user/settings`,
+          { headers: authService.getAuthHeader() }
+        )
+      );
+      return response.data;
+    } catch (error) {
+      // Return defaults if endpoint doesn't exist or fails
+      return { themeColor: 'ocean-blue', themeStyle: 'rounded-modern' };
+    }
+  },
+
+  async saveUserSettings(settings: { themeColor: string; themeStyle: string }): Promise<void> {
+    try {
+      await withRetry(() =>
+        axios.put(
+          `${API_BASE_URL}/api/user/settings`,
+          settings,
+          { headers: authService.getAuthHeader() }
+        )
+      );
+    } catch (error) {
+      // Silently fail - settings will be stored locally
+      console.warn('Failed to save settings to server, using local storage');
+    }
   },
 };

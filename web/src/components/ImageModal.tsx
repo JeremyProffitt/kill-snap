@@ -16,8 +16,6 @@ interface ImageModalProps {
   hasNext: boolean;
   currentIndex: number;
   totalImages: number;
-  showFilmstrip?: boolean;
-  onFilmstripToggle?: (show: boolean) => void;
 }
 
 const GROUP_COLORS = [
@@ -52,8 +50,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   hasNext,
   currentIndex,
   totalImages,
-  showFilmstrip = false,
-  onFilmstripToggle,
 }) => {
   const [groupNumber, setGroupNumber] = useState<number>(0);
   const [rating, setRating] = useState<number>(0);
@@ -353,12 +349,11 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       if (key === '+' || key === '=') { e.preventDefault(); setZoom(prev => Math.min(prev * 1.2, 5)); return; }
       if (key === '-') { e.preventDefault(); setZoom(prev => Math.max(prev * 0.8, 0.5)); return; }
       if (key === '0') { e.preventDefault(); resetZoom(); return; }
-      if (key === 'f' || key === 'F') { e.preventDefault(); onFilmstripToggle?.(!showFilmstrip); return; }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handleUndelete, handlePrev, handleNext, onClose, isDeleted, showFilmstrip, onFilmstripToggle, resetZoom]);
+  }, [handleGroupSelect, handleApprove, handleReject, handleDelete, handleUndelete, handlePrev, handleNext, onClose, isDeleted, resetZoom]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
@@ -366,7 +361,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
-      <div className={`modal-content ${showFilmstrip ? 'with-filmstrip' : ''}`}>
+      <div className="modal-content with-filmstrip">
         <button className="close-button" onClick={onClose} disabled={loading}>X</button>
 
         <div className="modal-body">
@@ -425,21 +420,6 @@ export const ImageModal: React.FC<ImageModalProps> = ({
               </div>
             )}
           </div>
-
-          <Filmstrip
-            images={images}
-            currentImageGUID={image.imageGUID}
-            onImageSelect={handleFilmstripSelect}
-            visible={showFilmstrip}
-          />
-
-          <button
-            className="filmstrip-toggle-btn"
-            onClick={() => onFilmstripToggle?.(!showFilmstrip)}
-            title={showFilmstrip ? 'Hide filmstrip (F)' : 'Show filmstrip (F)'}
-          >
-            {showFilmstrip ? 'Hide Filmstrip' : 'Show Filmstrip'}
-          </button>
 
           <div className="action-buttons-row">
             {isDeleted ? (
@@ -543,16 +523,23 @@ export const ImageModal: React.FC<ImageModalProps> = ({
           </div>
 
           <div className="keyboard-hints">
-            <span>Left/Right Nav</span>
+            <span>←/→ Nav</span>
             <span>1-5 Color</span>
             <span>Enter {isDeleted ? 'Undelete' : 'Approve'}</span>
             {!isDeleted && <span>R Reject</span>}
             {!isDeleted && <span>D Delete</span>}
             {isDeleted && <span>U Undelete</span>}
-            <span>F Filmstrip</span>
+            <span>+/- Zoom</span>
             <span>Esc Close</span>
           </div>
         </div>
+
+        <Filmstrip
+          images={images}
+          currentImageGUID={image.imageGUID}
+          onImageSelect={handleFilmstripSelect}
+          visible={true}
+        />
       </div>
     </div>
   );

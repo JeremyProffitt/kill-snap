@@ -18,9 +18,15 @@
   max-width: 700px;
   width: 100%;
   max-height: 95vh;
-  overflow-y: auto;
+  overflow: hidden;
   position: relative;
   color: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content.with-filmstrip {
+  max-height: 98vh;
 }
 
 .close-button {
@@ -49,6 +55,9 @@
 .modal-body {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* Modal header with title and counter */

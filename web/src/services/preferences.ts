@@ -9,8 +9,8 @@ export interface UserPreferences {
   showFilmstrip: boolean;
   confirmOnDelete: boolean;
   showKeyboardShortcuts: boolean;
-  hoverPreviewEnabled: boolean;
-  hoverPreviewDelay: number;
+  themeColor: string;
+  themeStyle: string;
 }
 
 const PREFERENCES_KEY = 'kill-snap-preferences';
@@ -24,8 +24,8 @@ const defaultPreferences: UserPreferences = {
   showFilmstrip: false,
   confirmOnDelete: true,
   showKeyboardShortcuts: true,
-  hoverPreviewEnabled: true,
-  hoverPreviewDelay: 500,
+  themeColor: 'ocean-blue',
+  themeStyle: 'rounded-modern',
 };
 
 export const getPreferences = (): UserPreferences => {

@@ -1,23 +1,10 @@
 .filmstrip {
-  position: absolute;
-  bottom: 50px;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.85);
+  position: relative;
+  background: rgba(0, 0, 0, 0.95);
   border-top: 1px solid #2a3a5a;
-  animation: filmstripSlideUp 0.2s ease;
+  flex-shrink: 0;
 }
 
-@keyframes filmstripSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .filmstrip-track {
   display: flex;
@@ -88,13 +75,14 @@
 
 .filmstrip-position {
   position: absolute;
-  top: -24px;
+  top: 4px;
   right: 12px;
   background: rgba(0, 0, 0, 0.7);
   color: #8892a6;
   font-size: 11px;
   padding: 4px 8px;
   border-radius: 4px;
+  z-index: 1;
 }
 
 /* Mobile responsive */
