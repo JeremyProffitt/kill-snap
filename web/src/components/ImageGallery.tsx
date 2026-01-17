@@ -1205,25 +1205,23 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-header">
-            <div className="sidebar-header-buttons">
-              <button
-                className="sidebar-toggle-btn"
-                onClick={toggleSidebar}
-                title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              >
-                {sidebarCollapsed ? '»' : '«'}
-              </button>
-              {!sidebarCollapsed && (
-                <button
-                  className="shortcuts-btn"
-                  onClick={() => setShowShortcutsHelp(true)}
-                  title="Keyboard shortcuts (?)"
-                >
-                  ⌨
-                </button>
-              )}
-            </div>
+            <button
+              className="sidebar-toggle-btn"
+              onClick={toggleSidebar}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {sidebarCollapsed ? '»' : '«'}
+            </button>
             <h1 className="sidebar-title">{sidebarCollapsed ? 'KS' : 'Kill Snap'}</h1>
+            {!sidebarCollapsed && (
+              <button
+                className="shortcuts-btn"
+                onClick={() => setShowShortcutsHelp(true)}
+                title="Keyboard shortcuts (?)"
+              >
+                ⌨
+              </button>
+            )}
           </div>
 
           <div className="image-count-container">
