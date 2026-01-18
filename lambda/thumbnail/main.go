@@ -330,7 +330,7 @@ func (e *SoftRetryError) Error() string {
 	return e.Message
 }
 
-func handler(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSBatchResponse, error) {
+func handler(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSEventResponse, error) {
 	var batchItemFailures []events.SQSBatchItemFailure
 
 	for _, sqsRecord := range sqsEvent.Records {
@@ -405,7 +405,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSBatchResp
 		}
 	} // end outer for loop (SQS records)
 
-	return events.SQSBatchResponse{
+	return events.SQSEventResponse{
 		BatchItemFailures: batchItemFailures,
 	}, nil
 }
