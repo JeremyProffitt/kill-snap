@@ -1295,6 +1295,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		// Delete project: /api/projects/{projectId}
 		projectID := strings.TrimPrefix(path, "/api/projects/")
 		return handleDeleteProject(projectID, headers)
+	// Logs route
+	case path == "/api/logs" && method == "GET":
+		return handleGetLogs(request.QueryStringParameters, headers)
 	default:
 		return errorResponse(404, "Not found", headers)
 	}
@@ -3003,6 +3006,111 @@ func errorResponse(statusCode int, message string, headers map[string]string) (e
 	body, _ := json.Marshal(map[string]string{"error": message})
 	return events.APIGatewayProxyResponse{
 		StatusCode: statusCode,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+// LogEntry represents a single log entry
+type LogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+}
+
+// LogsResponse is the response for the logs endpoint
+type LogsResponse struct {
+	Logs  []LogEntry `json:"logs"`
+	Count int        `json:"count"`
+}
+
+func handleGetLogs(params map[string]string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Validate required function parameter
+	functionName := params["function"]
+	if functionName == "" {
+		return errorResponse(400, "Missing required parameter: function", headers)
+	}
+
+	// Validate function name is one of the allowed values
+	allowedFunctions := map[string]string{
+		"ImageThumbnailGenerator": "/aws/lambda/ImageThumbnailGenerator",
+		"ImageReviewApi":          "/aws/lambda/ImageReviewApi",
+		"ProjectZipGenerator":     "/aws/lambda/ProjectZipGenerator",
+	}
+
+	logGroupName, ok := allowedFunctions[functionName]
+	if !ok {
+		return errorResponse(400, "Invalid function name. Allowed values: ImageThumbnailGenerator, ImageReviewApi, ProjectZipGenerator", headers)
+	}
+
+	// Parse hours parameter (default 1)
+	hours := 1
+	if hoursStr, ok := params["hours"]; ok && hoursStr != "" {
+		switch hoursStr {
+		case "1":
+			hours = 1
+		case "24":
+			hours = 24
+		case "48":
+			hours = 48
+		case "168":
+			hours = 168
+		default:
+			return errorResponse(400, "Invalid hours parameter. Allowed values: 1, 24, 48, 168", headers)
+		}
+	}
+
+	// Parse filter parameter (default "error")
+	filterMode := "error"
+	if filter, ok := params["filter"]; ok && filter != "" {
+		if filter != "error" && filter != "all" {
+			return errorResponse(400, "Invalid filter parameter. Allowed values: error, all", headers)
+		}
+		filterMode = filter
+	}
+
+	// Calculate start time
+	startTime := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	// Build filter pattern for error logs
+	var filterPattern *string
+	if filterMode == "error" {
+		pattern := "?ERROR ?error ?Error ?Exception ?exception ?500 ?403 ?401"
+		filterPattern = aws.String(pattern)
+	}
+
+	// Query CloudWatch Logs
+	input := &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupName: aws.String(logGroupName),
+		StartTime:    aws.Int64(startTime.UnixMilli()),
+		Limit:        aws.Int64(500),
+	}
+	if filterPattern != nil {
+		input.FilterPattern = filterPattern
+	}
+
+	result, err := cwLogsClient.FilterLogEvents(input)
+	if err != nil {
+		return errorResponse(500, fmt.Sprintf("Failed to fetch logs: %v", err), headers)
+	}
+
+	// Convert to response format
+	logs := make([]LogEntry, 0, len(result.Events))
+	for _, event := range result.Events {
+		timestamp := time.UnixMilli(*event.Timestamp).UTC().Format(time.RFC3339Nano)
+		logs = append(logs, LogEntry{
+			Timestamp: timestamp,
+			Message:   *event.Message,
+		})
+	}
+
+	response := LogsResponse{
+		Logs:  logs,
+		Count: len(logs),
+	}
+
+	body, _ := json.Marshal(response)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
 		Headers:    headers,
 		Body:       string(body),
 	}, nil

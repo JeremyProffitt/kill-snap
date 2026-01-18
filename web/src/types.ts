@@ -66,3 +66,13 @@ export interface AddToProjectRequest {
   group?: number;
   imageGUID?: string;
 }
+
+export interface LogEntry {
+  timestamp: string;
+  message: string;
+}
+
+export interface LogsResponse {
+  logs: LogEntry[];
+  count: number;
+}

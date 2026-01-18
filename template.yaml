@@ -519,6 +519,8 @@ Resources:
               Action:
                 - logs:FilterLogEvents
               Resource:
+                - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ImageThumbnailGenerator:*'
+                - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ImageReviewApi:*'
                 - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ProjectZipGenerator:*'
             - Effect: Allow
               Action:
@@ -635,6 +637,12 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/images/{imageId}/regenerate-ai
             Method: POST
+        GetLogs:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/logs
+            Method: GET
         # Keyword backfill for images without AI analysis - runs every 15 minutes
         GetStats:
           Type: Api

@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { API_BASE_URL, IMAGE_CDN_URL } from '../config';
 import { authService } from './auth';
-import { Image, UpdateImageRequest, Project, AddToProjectRequest } from '../types';
+import { Image, UpdateImageRequest, Project, AddToProjectRequest, LogsResponse } from '../types';
 
 const RETRY_DELAYS = [300, 600, 1200, 2400]; // Exponential backoff for throttling
 
@@ -348,6 +348,22 @@ export const api = {
       axios.get<SystemStats>(`${API_BASE_URL}/api/stats`, {
         headers: authService.getAuthHeader()
       })
+    );
+    return response.data;
+  },
+
+  async getLogs(
+    functionName: string,
+    hours: number = 1,
+    filter: 'error' | 'all' = 'error'
+  ): Promise<LogsResponse> {
+    const params = new URLSearchParams();
+    params.append('function', functionName);
+    params.append('hours', String(hours));
+    params.append('filter', filter);
+    const response = await axios.get<LogsResponse>(
+      `${API_BASE_URL}/api/logs?${params.toString()}`,
+      { headers: authService.getAuthHeader() }
     );
     return response.data;
   },
