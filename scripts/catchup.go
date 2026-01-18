@@ -7,6 +7,7 @@
 //   go run catchup.go -push -nolimit     # Push ALL unprocessed files (no limit)
 //   go run catchup.go -dry-run           # Show what would be pushed without actually pushing
 //   go run catchup.go -watch             # Watch SQS queue and CloudWatch logs for errors
+//   go run catchup.go -redrive           # Move DLQ messages back to main queue for retry
 
 package main
 
@@ -121,6 +122,7 @@ func main() {
 	noLimit := flag.Bool("nolimit", false, "Process ALL unprocessed files (no limit)")
 	verbose := flag.Bool("verbose", false, "Show detailed output for each file")
 	watch := flag.Bool("watch", false, "Watch SQS queue and CloudWatch logs (press 'q' to quit)")
+	redrive := flag.Bool("redrive", false, "Move DLQ messages back to main queue for retry")
 	flag.Parse()
 
 	// If -nolimit is set, override the limit to 0 (unlimited)
@@ -136,6 +138,12 @@ func main() {
 	// Handle watch mode separately
 	if *watch {
 		runWatchMode(sess)
+		return
+	}
+
+	// Handle redrive mode separately
+	if *redrive {
+		runRedriveMode(sess, *dryRun)
 		return
 	}
 
@@ -358,6 +366,101 @@ func runWatchMode(sess *session.Session) {
 			}
 		}
 	}
+}
+
+// runRedriveMode moves messages from DLQ back to main queue
+func runRedriveMode(sess *session.Session, dryRun bool) {
+	sqsClient := sqs.New(sess)
+
+	fmt.Println("=== DLQ Redrive Mode ===")
+	fmt.Printf("Source (DLQ):  %s\n", defaultDLQURL)
+	fmt.Printf("Target (Main): %s\n", queueURL)
+	fmt.Println()
+
+	// Get DLQ depth
+	dlqDepth, _ := getQueueDepth(sqsClient, defaultDLQURL)
+	if dlqDepth == 0 {
+		fmt.Println("DLQ is empty. Nothing to redrive.")
+		return
+	}
+
+	fmt.Printf("Found %d message(s) in DLQ\n", dlqDepth)
+	fmt.Println()
+
+	if dryRun {
+		fmt.Println("DRY RUN: Would move messages from DLQ to main queue")
+		fmt.Println("Run without -dry-run to actually move the messages")
+		return
+	}
+
+	fmt.Println("Moving messages from DLQ to main queue...")
+	fmt.Println("(Messages will be retried with full retry count)")
+	fmt.Println()
+
+	moved := 0
+	errors := 0
+
+	// Process messages in batches
+	for {
+		// Receive up to 10 messages from DLQ
+		receiveResult, err := sqsClient.ReceiveMessage(&sqs.ReceiveMessageInput{
+			QueueUrl:            aws.String(defaultDLQURL),
+			MaxNumberOfMessages: aws.Int64(10),
+			WaitTimeSeconds:     aws.Int64(1), // Short wait since we know there are messages
+			VisibilityTimeout:   aws.Int64(30),
+		})
+		if err != nil {
+			fmt.Printf("Error receiving from DLQ: %v\n", err)
+			break
+		}
+
+		if len(receiveResult.Messages) == 0 {
+			break // No more messages
+		}
+
+		for _, msg := range receiveResult.Messages {
+			// Send to main queue
+			_, err := sqsClient.SendMessage(&sqs.SendMessageInput{
+				QueueUrl:    aws.String(queueURL),
+				MessageBody: msg.Body,
+			})
+			if err != nil {
+				fmt.Printf("  Error sending to main queue: %v\n", err)
+				errors++
+				continue
+			}
+
+			// Delete from DLQ
+			_, err = sqsClient.DeleteMessage(&sqs.DeleteMessageInput{
+				QueueUrl:      aws.String(defaultDLQURL),
+				ReceiptHandle: msg.ReceiptHandle,
+			})
+			if err != nil {
+				fmt.Printf("  Error deleting from DLQ: %v\n", err)
+				errors++
+				continue
+			}
+
+			moved++
+			if moved%10 == 0 {
+				fmt.Printf("  Moved %d messages...\n", moved)
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("=== Redrive Complete ===\n")
+	fmt.Printf("Messages moved: %d\n", moved)
+	if errors > 0 {
+		fmt.Printf("Errors: %d\n", errors)
+	}
+
+	// Show new queue depths
+	mainDepth, mainInFlight := getQueueDepth(sqsClient, queueURL)
+	newDlqDepth, _ := getQueueDepth(sqsClient, defaultDLQURL)
+	fmt.Println()
+	fmt.Printf("Main queue: %d pending, %d in-flight\n", mainDepth, mainInFlight)
+	fmt.Printf("DLQ: %d remaining\n", newDlqDepth)
 }
 
 // doWatchPoll performs one poll of SQS and CloudWatch
