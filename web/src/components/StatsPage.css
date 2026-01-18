@@ -1,0 +1,252 @@
+.stats-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.stats-modal {
+  background: #1a1a2e;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 900px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #2a3a5a;
+  position: sticky;
+  top: 0;
+  background: #1a1a2e;
+  z-index: 10;
+}
+
+.stats-header h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.25rem;
+}
+
+.stats-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.last-refresh {
+  color: #8892a6;
+  font-size: 0.75rem;
+}
+
+.refresh-btn,
+.close-btn {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.refresh-btn {
+  background: #16213e;
+  color: #8892a6;
+  border: 1px solid #2a3a5a;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: #2a3a5a;
+  color: #fff;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.close-btn {
+  background: #2a3a5a;
+  color: #fff;
+}
+
+.close-btn:hover {
+  background: #3a4a6a;
+}
+
+.stats-section {
+  padding: 1rem 1.5rem;
+}
+
+.stats-section h3 {
+  margin: 0 0 0.75rem 0;
+  color: #8892a6;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stat-card {
+  background: #16213e;
+  border: 1px solid #2a3a5a;
+  border-radius: 8px;
+  padding: 1rem;
+  transition: all 0.15s;
+}
+
+.stat-card:hover {
+  border-color: #3a4a6a;
+}
+
+.stat-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.stat-card-title {
+  color: #8892a6;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.stat-indicator.warning {
+  background: #f39c12;
+  box-shadow: 0 0 8px rgba(243, 156, 18, 0.5);
+}
+
+.stat-indicator.alert {
+  background: #e74c3c;
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.5);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.stat-card-value {
+  font-size: 2rem;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1;
+}
+
+.stat-healthy .stat-card-value {
+  color: #2ecc71;
+}
+
+.stat-warning .stat-card-value {
+  color: #f39c12;
+}
+
+.stat-alert .stat-card-value {
+  color: #e74c3c;
+}
+
+.stat-card-subtitle {
+  color: #6a7a8a;
+  font-size: 0.7rem;
+  margin-top: 0.25rem;
+}
+
+/* Skeleton loading */
+.stat-card.skeleton {
+  background: #16213e;
+}
+
+.skeleton-title {
+  height: 12px;
+  width: 60%;
+  background: linear-gradient(90deg, #2a3a5a 25%, #3a4a6a 50%, #2a3a5a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.skeleton-value {
+  height: 32px;
+  width: 40%;
+  background: linear-gradient(90deg, #2a3a5a 25%, #3a4a6a 50%, #2a3a5a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Error state */
+.stats-error {
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+.stats-error p {
+  color: #e74c3c;
+  margin-bottom: 1rem;
+}
+
+.stats-error button {
+  padding: 0.5rem 1rem;
+  background: #2a3a5a;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.stats-error button:hover {
+  background: #3a4a6a;
+}

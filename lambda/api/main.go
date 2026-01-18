@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	lambdasvc "github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -38,6 +39,7 @@ var (
 	s3Client          *s3.S3
 	lambdaClient      *lambdasvc.Lambda
 	cwLogsClient      *cloudwatchlogs.CloudWatchLogs
+	sqsClient         *sqs.SQS
 	bucketName        string
 	imageTable        string
 	usersTable        string
@@ -48,6 +50,8 @@ var (
 	functionName      string
 	openaiAPIKey      string
 	zipLambdaName     string
+	sqsQueueURL       string
+	sqsDLQURL         string
 	jwtSecret         = []byte("kill-snap-secret-key-change-in-production")
 )
 
@@ -57,6 +61,7 @@ func init() {
 	s3Client = s3.New(sess)
 	lambdaClient = lambdasvc.New(sess)
 	cwLogsClient = cloudwatchlogs.New(sess)
+	sqsClient = sqs.New(sess)
 	bucketName = os.Getenv("BUCKET_NAME")
 	imageTable = os.Getenv("IMAGE_TABLE")
 	usersTable = os.Getenv("USERS_TABLE")
@@ -67,6 +72,8 @@ func init() {
 	functionName = os.Getenv("AWS_LAMBDA_FUNCTION_NAME")
 	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
 	zipLambdaName = os.Getenv("ZIP_LAMBDA_NAME")
+	sqsQueueURL = os.Getenv("SQS_QUEUE_URL")
+	sqsDLQURL = os.Getenv("SQS_DLQ_URL")
 
 	// Initialize admin user if it doesn't exist
 	if adminUsername != "" && adminPassword != "" {
@@ -1213,6 +1220,8 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 
 	// Route requests
 	switch {
+	case path == "/api/stats" && method == "GET":
+		return handleGetStats(headers)
 	case path == "/api/images" && method == "GET":
 		return handleListImages(request, headers)
 	case strings.HasPrefix(path, "/api/images/") && method == "PUT":
@@ -2840,6 +2849,148 @@ func validateToken(tokenString string) bool {
 	})
 
 	return err == nil && token.Valid
+}
+
+// StatsResponse represents the system health stats
+type StatsResponse struct {
+	IncomingCount   int    `json:"incomingCount"`
+	ProcessedCount  int    `json:"processedCount"`
+	UnreviewedCount int    `json:"unreviewedCount"`
+	ReviewedCount   int    `json:"reviewedCount"`
+	ApprovedCount   int    `json:"approvedCount"`
+	RejectedCount   int    `json:"rejectedCount"`
+	DeletedCount    int    `json:"deletedCount"`
+	SQSQueueDepth   int    `json:"sqsQueueDepth"`
+	SQSDLQDepth     int    `json:"sqsDlqDepth"`
+	LastUpdated     string `json:"lastUpdated"`
+}
+
+func handleGetStats(headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	stats := StatsResponse{
+		LastUpdated: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Count incoming items in S3 (objects in incoming/ prefix)
+	listInput := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+		Prefix: aws.String("incoming/"),
+	}
+
+	incomingCount := 0
+	err := s3Client.ListObjectsV2Pages(listInput, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		incomingCount += len(page.Contents)
+		return true
+	})
+	if err != nil {
+		fmt.Printf("Error listing incoming objects: %v\n", err)
+	}
+	stats.IncomingCount = incomingCount
+
+	// Count images by status from DynamoDB
+	// Scan the table and count by status
+	scanInput := &dynamodb.ScanInput{
+		TableName: aws.String(imageTable),
+		ProjectionExpression: aws.String("#s, #r"),
+		ExpressionAttributeNames: map[string]*string{
+			"#s": aws.String("Status"),
+			"#r": aws.String("Reviewed"),
+		},
+	}
+
+	var unreviewedCount, approvedCount, rejectedCount, deletedCount int
+
+	err = ddbClient.ScanPages(scanInput, func(page *dynamodb.ScanOutput, lastPage bool) bool {
+		for _, item := range page.Items {
+			status := ""
+			reviewed := ""
+			if item["Status"] != nil && item["Status"].S != nil {
+				status = *item["Status"].S
+			}
+			if item["Reviewed"] != nil && item["Reviewed"].S != nil {
+				reviewed = *item["Reviewed"].S
+			}
+
+			switch status {
+			case "deleted":
+				deletedCount++
+			case "approved":
+				approvedCount++
+			case "rejected":
+				rejectedCount++
+			default:
+				// Check if reviewed
+				if reviewed == "no" || reviewed == "" {
+					unreviewedCount++
+				} else if status == "inbox" || status == "" {
+					// Reviewed but still in inbox - could be approved or rejected based on groupNumber
+					// For simplicity, count as reviewed
+					approvedCount++
+				}
+			}
+		}
+		return true
+	})
+	if err != nil {
+		fmt.Printf("Error scanning DynamoDB: %v\n", err)
+	}
+
+	stats.UnreviewedCount = unreviewedCount
+	stats.ApprovedCount = approvedCount
+	stats.RejectedCount = rejectedCount
+	stats.DeletedCount = deletedCount
+	stats.ProcessedCount = unreviewedCount + approvedCount + rejectedCount + deletedCount
+	stats.ReviewedCount = approvedCount + rejectedCount + deletedCount
+
+	// Get SQS queue depth
+	if sqsQueueURL != "" {
+		queueAttrs, err := sqsClient.GetQueueAttributes(&sqs.GetQueueAttributesInput{
+			QueueUrl: aws.String(sqsQueueURL),
+			AttributeNames: []*string{
+				aws.String("ApproximateNumberOfMessages"),
+				aws.String("ApproximateNumberOfMessagesNotVisible"),
+			},
+		})
+		if err != nil {
+			fmt.Printf("Error getting SQS queue attributes: %v\n", err)
+		} else {
+			if val, ok := queueAttrs.Attributes["ApproximateNumberOfMessages"]; ok {
+				if n, err := strconv.Atoi(*val); err == nil {
+					stats.SQSQueueDepth += n
+				}
+			}
+			if val, ok := queueAttrs.Attributes["ApproximateNumberOfMessagesNotVisible"]; ok {
+				if n, err := strconv.Atoi(*val); err == nil {
+					stats.SQSQueueDepth += n
+				}
+			}
+		}
+	}
+
+	// Get DLQ depth
+	if sqsDLQURL != "" {
+		dlqAttrs, err := sqsClient.GetQueueAttributes(&sqs.GetQueueAttributesInput{
+			QueueUrl: aws.String(sqsDLQURL),
+			AttributeNames: []*string{
+				aws.String("ApproximateNumberOfMessages"),
+			},
+		})
+		if err != nil {
+			fmt.Printf("Error getting DLQ attributes: %v\n", err)
+		} else {
+			if val, ok := dlqAttrs.Attributes["ApproximateNumberOfMessages"]; ok {
+				if n, err := strconv.Atoi(*val); err == nil {
+					stats.SQSDLQDepth = n
+				}
+			}
+		}
+	}
+
+	body, _ := json.Marshal(stats)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
 }
 
 func errorResponse(statusCode int, message string, headers map[string]string) (events.APIGatewayProxyResponse, error) {

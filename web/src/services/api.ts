@@ -44,6 +44,19 @@ export interface ImageFilters {
   group?: number | 'all';
 }
 
+export interface SystemStats {
+  incomingCount: number;
+  processedCount: number;
+  unreviewedCount: number;
+  reviewedCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  deletedCount: number;
+  sqsQueueDepth: number;
+  sqsDlqDepth: number;
+  lastUpdated: string;
+}
+
 export const api = {
   async getImages(filters?: ImageFilters): Promise<Image[]> {
     const params = new URLSearchParams();
@@ -328,5 +341,14 @@ export const api = {
       // Silently fail - settings will be stored locally
       console.warn('Failed to save settings to server, using local storage');
     }
+  },
+
+  async getStats(): Promise<SystemStats> {
+    const response = await withRetry(() =>
+      axios.get<SystemStats>(`${API_BASE_URL}/api/stats`, {
+        headers: authService.getAuthHeader()
+      })
+    );
+    return response.data;
   },
 };

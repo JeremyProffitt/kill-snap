@@ -477,6 +477,8 @@ Resources:
           ADMIN_PASSWORD: !Ref AdminPassword
           OPENAI_API_KEY: !Ref OpenAIApiKey
           ZIP_LAMBDA_NAME: !Ref ZipGeneratorFunction
+          SQS_QUEUE_URL: !Ref ImageProcessingQueue
+          SQS_DLQ_URL: !Ref ImageProcessingDLQ
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -514,6 +516,12 @@ Resources:
                 - logs:FilterLogEvents
               Resource:
                 - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ProjectZipGenerator:*'
+            - Effect: Allow
+              Action:
+                - sqs:GetQueueAttributes
+              Resource:
+                - !GetAtt ImageProcessingQueue.Arn
+                - !GetAtt ImageProcessingDLQ.Arn
       Events:
         Login:
           Type: Api
@@ -624,6 +632,12 @@ Resources:
             Path: /api/images/{imageId}/regenerate-ai
             Method: POST
         # Keyword backfill for images without AI analysis - runs every 15 minutes
+        GetStats:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/stats
+            Method: GET
         KeywordBackfill:
           Type: Schedule
           Properties:

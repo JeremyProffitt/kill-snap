@@ -11,6 +11,7 @@ import { BulkActionBar } from './BulkActionBar';
 import { ConfirmDialog } from './ConfirmDialog';
 import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
 import { ThemeSettings } from './ThemeSettings';
+import { StatsPage } from './StatsPage';
 import { EmptyState } from './EmptyState';
 import { PageSkeleton } from './SkeletonLoader';
 import { getPreferences, savePreference, savePreferences, UserPreferences } from '../services/preferences';
@@ -160,6 +161,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   // Theme settings
   const [showThemeSettings, setShowThemeSettings] = useState(false);
+
+  // Stats page
+  const [showStats, setShowStats] = useState(false);
   
   // Transfer and notification state
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
@@ -1237,6 +1241,9 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         currentStyleId={preferences.themeStyle}
         onThemeChange={handleThemeChange}
       />
+      {showStats && (
+        <StatsPage onClose={() => setShowStats(false)} />
+      )}
       
       <ConfirmDialog
         isOpen={confirmDialog.isOpen}
@@ -1548,13 +1555,22 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
         <div className="sidebar-bottom">
           {!sidebarCollapsed && (
-            <button
-              className="settings-btn"
-              onClick={() => setShowThemeSettings(true)}
-              title="Appearance settings"
-            >
-              Appearance
-            </button>
+            <>
+              <button
+                className="settings-btn"
+                onClick={() => setShowStats(true)}
+                title="System stats"
+              >
+                Stats
+              </button>
+              <button
+                className="settings-btn"
+                onClick={() => setShowThemeSettings(true)}
+                title="Appearance settings"
+              >
+                Appearance
+              </button>
+            </>
           )}
           <button onClick={handleLogout} className="logout-button">
             {sidebarCollapsed ? 'X' : 'Logout'}
