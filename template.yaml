@@ -150,7 +150,7 @@ Resources:
       CodeUri: lambda/thumbnail/
       Handler: bootstrap
       MemorySize: 3008
-      Timeout: 90
+      Timeout: 180
       Environment:
         Variables:
           BUCKET_NAME: !Ref S3BucketName
@@ -188,7 +188,7 @@ Resources:
       Runtime: provided.al2023
       CodeUri: lambda/zip/
       Handler: bootstrap
-      MemorySize: 1024
+      MemorySize: 3008
       Timeout: 900  # 15 minutes for large zip generation
       EphemeralStorage:
         Size: 10240  # 10GB ephemeral storage for temp zip files
@@ -280,7 +280,7 @@ Resources:
       CodeUri: lambda/api/
       Handler: bootstrap
       MemorySize: 256
-      Timeout: 60
+      Timeout: 180
       Environment:
         Variables:
           BUCKET_NAME: !Ref S3BucketName
