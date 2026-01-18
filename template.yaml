@@ -364,6 +364,8 @@ Resources:
           Properties:
             Queue: !GetAtt ImageProcessingQueue.Arn
             BatchSize: 1  # Process one image at a time for reliability
+            FunctionResponseTypes:
+              - ReportBatchItemFailures  # Enable partial batch failure reporting
 
   # Lambda function for project zip generation
   ZipGeneratorFunction:

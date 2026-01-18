@@ -320,16 +320,32 @@ func updateRecordWithRawFile(imageGUID, rawFileKey string) error {
 	return err
 }
 
-func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
+// SoftRetryError indicates a message should be retried but isn't a real error
+// (e.g., RAW file waiting for its JPG to be processed first)
+type SoftRetryError struct {
+	Message string
+}
+
+func (e *SoftRetryError) Error() string {
+	return e.Message
+}
+
+func handler(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSBatchResponse, error) {
+	var batchItemFailures []events.SQSBatchItemFailure
+
 	for _, sqsRecord := range sqsEvent.Records {
 		// Parse S3 event from SQS message body
 		var s3Event events.S3Event
 		if err := json.Unmarshal([]byte(sqsRecord.Body), &s3Event); err != nil {
 			fmt.Printf("Error parsing S3 event from SQS message: %v\n", err)
-			// Return error to trigger retry via SQS visibility timeout
-			return fmt.Errorf("failed to parse S3 event: %v", err)
+			// Add to batch failures for retry
+			batchItemFailures = append(batchItemFailures, events.SQSBatchItemFailure{
+				ItemIdentifier: sqsRecord.MessageId,
+			})
+			continue
 		}
 
+		var recordFailed bool
 		for _, record := range s3Event.Records {
 			bucket := record.S3.Bucket.Name
 			key := record.S3.Object.Key
@@ -363,21 +379,35 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 			// Route based on file type
 			if isRawFile(key) {
 				if err := processRawFile(bucket, key, sqsRecord.ReceiptHandle); err != nil {
-					fmt.Printf("Error processing RAW file %s: %v\n", key, err)
-					return err
+					// Check if this is a soft retry (RAW waiting for JPG)
+					if _, isSoftRetry := err.(*SoftRetryError); isSoftRetry {
+						fmt.Printf("RAW file %s scheduled for retry (not an error)\n", key)
+					} else {
+						fmt.Printf("Error processing RAW file %s: %v\n", key, err)
+					}
+					recordFailed = true
 				}
 			} else if isJpgFile(key) {
 				if err := processJpgFile(bucket, key); err != nil {
 					fmt.Printf("Error processing JPG file %s: %v\n", key, err)
-					return err
+					recordFailed = true
 				}
 			} else {
 				fmt.Printf("Skipping unsupported file type: %s\n", key)
 			}
 		} // end inner for loop (S3 records)
+
+		// If any record in this SQS message failed, mark the whole message for retry
+		if recordFailed {
+			batchItemFailures = append(batchItemFailures, events.SQSBatchItemFailure{
+				ItemIdentifier: sqsRecord.MessageId,
+			})
+		}
 	} // end outer for loop (SQS records)
 
-	return nil
+	return events.SQSBatchResponse{
+		BatchItemFailures: batchItemFailures,
+	}, nil
 }
 
 // processJpgFile handles JPG file processing with UUID-based naming
@@ -567,7 +597,7 @@ func processRawFile(bucket, key, receiptHandle string) error {
 			}
 		}
 
-		return fmt.Errorf("JPG not yet processed for RAW file %s, will retry in 20 minutes", originalFilename)
+		return &SoftRetryError{Message: fmt.Sprintf("JPG not yet processed for RAW file %s, will retry in 20 minutes", originalFilename)}
 	}
 
 	// Check if RAW is already linked
