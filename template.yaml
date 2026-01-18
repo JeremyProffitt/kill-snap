@@ -320,7 +320,8 @@ Resources:
       Handler: bootstrap
       MemorySize: 3008
       Timeout: 180
-      ReservedConcurrentExecutions: 10  # Process up to 10 images in parallel
+      # Lambda will automatically scale to process multiple SQS messages in parallel
+      # (no ReservedConcurrentExecutions needed - using default account-level limits)
       Environment:
         Variables:
           BUCKET_NAME: !Ref S3BucketName
