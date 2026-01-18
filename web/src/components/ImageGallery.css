@@ -1114,18 +1114,20 @@
 
 .search-clear-btn {
   position: absolute;
-  right: 4px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  background: none;
+  background: rgba(255, 255, 255, 0.1);
   border: none;
-  color: #6c7a8a;
-  font-size: 0.7rem;
+  color: #a0a8b8;
+  font-size: 0.75rem;
+  font-weight: bold;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 2px 6px;
   line-height: 1;
-  border-radius: 2px;
+  border-radius: 3px;
   transition: all 0.15s;
+  z-index: 1;
 }
 
 .search-clear-btn:hover {

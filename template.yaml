@@ -325,6 +325,7 @@ Resources:
           BUCKET_NAME: !Ref S3BucketName
           DYNAMODB_TABLE: !Ref ImageMetadataTable
           OPENAI_API_KEY: !Ref OpenAIApiKey
+          SQS_QUEUE_URL: !Ref ImageProcessingQueue
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -345,12 +346,15 @@ Resources:
                 - dynamodb:DeleteItem
                 - dynamodb:Query
                 - dynamodb:Scan
-              Resource: !GetAtt ImageMetadataTable.Arn
+              Resource:
+                - !GetAtt ImageMetadataTable.Arn
+                - !Sub ${ImageMetadataTable.Arn}/index/*
             - Effect: Allow
               Action:
                 - sqs:ReceiveMessage
                 - sqs:DeleteMessage
                 - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
               Resource: !GetAtt ImageProcessingQueue.Arn
       Events:
         SQSEvent:

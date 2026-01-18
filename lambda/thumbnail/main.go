@@ -23,6 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/disintegration/imaging"
 	"github.com/google/uuid"
 	"github.com/rwcarlsen/goexif/exif"
@@ -101,7 +102,9 @@ type CircuitBreaker struct {
 var (
 	s3Client       *s3.S3
 	ddbClient      *dynamodb.DynamoDB
+	sqsClient      *sqs.SQS
 	tableName      string
+	sqsQueueURL    string
 	openaiAPIKey   string
 	circuitBreaker CircuitBreaker
 )
@@ -109,6 +112,7 @@ var (
 const (
 	circuitBreakerThreshold = 5               // Open circuit after 5 consecutive failures
 	circuitBreakerReset     = 5 * time.Minute // Reset circuit after 5 minutes
+	rawRetryDelaySeconds    = 1200            // 20 minutes delay for RAW file retries when JPG not ready
 )
 
 // Supported RAW file extensions (case-insensitive)
@@ -147,7 +151,9 @@ func init() {
 	sess := session.Must(session.NewSession())
 	s3Client = s3.New(sess)
 	ddbClient = dynamodb.New(sess)
+	sqsClient = sqs.New(sess)
 	tableName = os.Getenv("DYNAMODB_TABLE")
+	sqsQueueURL = os.Getenv("SQS_QUEUE_URL")
 	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
 	circuitBreaker = CircuitBreaker{}
 }
@@ -356,7 +362,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 			// Route based on file type
 			if isRawFile(key) {
-				if err := processRawFile(bucket, key); err != nil {
+				if err := processRawFile(bucket, key, sqsRecord.ReceiptHandle); err != nil {
 					fmt.Printf("Error processing RAW file %s: %v\n", key, err)
 					return err
 				}
@@ -529,7 +535,8 @@ func processJpgFile(bucket, key string) error {
 }
 
 // processRawFile handles RAW file processing - links to existing JPG record
-func processRawFile(bucket, key string) error {
+// receiptHandle is used to set a longer visibility timeout if JPG isn't ready yet
+func processRawFile(bucket, key, receiptHandle string) error {
 	// Extract original filename (without path and extension)
 	originalFilename := extractBaseName(key)
 	rawExt := strings.ToLower(filepath.Ext(key))
@@ -543,9 +550,24 @@ func processRawFile(bucket, key string) error {
 	}
 
 	if existingRecord == nil {
-		// JPG hasn't been processed yet - return error to trigger SQS retry
-		fmt.Printf("No matching JPG found for RAW file %s - will retry via SQS\n", key)
-		return fmt.Errorf("JPG not yet processed for RAW file %s, will retry", originalFilename)
+		// JPG hasn't been processed yet - set 20 minute visibility timeout and return error
+		fmt.Printf("No matching JPG found for RAW file %s - setting 20 minute delay before retry\n", key)
+
+		// Change message visibility to delay retry by 20 minutes
+		if sqsQueueURL != "" && receiptHandle != "" {
+			_, visErr := sqsClient.ChangeMessageVisibility(&sqs.ChangeMessageVisibilityInput{
+				QueueUrl:          aws.String(sqsQueueURL),
+				ReceiptHandle:     aws.String(receiptHandle),
+				VisibilityTimeout: aws.Int64(rawRetryDelaySeconds),
+			})
+			if visErr != nil {
+				fmt.Printf("Warning: failed to change message visibility: %v\n", visErr)
+			} else {
+				fmt.Printf("Set message visibility timeout to %d seconds for RAW retry\n", rawRetryDelaySeconds)
+			}
+		}
+
+		return fmt.Errorf("JPG not yet processed for RAW file %s, will retry in 20 minutes", originalFilename)
 	}
 
 	// Check if RAW is already linked
