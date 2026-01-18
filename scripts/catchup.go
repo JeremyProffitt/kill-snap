@@ -8,6 +8,8 @@
 //   go run catchup.go -dry-run           # Show what would be pushed without actually pushing
 //   go run catchup.go -watch             # Watch SQS queue and CloudWatch logs for errors
 //   go run catchup.go -redrive           # Move DLQ messages back to main queue for retry
+//   go run catchup.go -orphans           # Fix orphaned images (cross-reference S3 and DynamoDB)
+//   go run catchup.go -migrate           # Migrate old file naming to new GUID format
 
 package main
 
@@ -26,8 +28,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/google/uuid"
 )
 
 // Default configuration for kill-snap project
@@ -114,6 +118,29 @@ type Stats struct {
 	Errors           int
 }
 
+// ImageRecord represents a DynamoDB image metadata record
+type ImageRecord struct {
+	ImageGUID        string `json:"ImageGUID" dynamodbav:"ImageGUID"`
+	OriginalFile     string `json:"OriginalFile" dynamodbav:"OriginalFile"`
+	OriginalFilename string `json:"OriginalFilename" dynamodbav:"OriginalFilename"`
+	RawFile          string `json:"RawFile,omitempty" dynamodbav:"RawFile,omitempty"`
+	Bucket           string `json:"Bucket" dynamodbav:"Bucket"`
+	Thumbnail50      string `json:"Thumbnail50" dynamodbav:"Thumbnail50"`
+	Thumbnail400     string `json:"Thumbnail400" dynamodbav:"Thumbnail400"`
+	Reviewed         string `json:"Reviewed" dynamodbav:"Reviewed"`
+}
+
+// OrphanStats tracks orphan fixing statistics
+type OrphanStats struct {
+	TotalDynamoRecords    int
+	TotalS3Images         int
+	OrphanedDynamo        int // DynamoDB records without S3 files
+	OrphanedS3            int // S3 files without DynamoDB records
+	MislocatedS3          int // S3 files in wrong location
+	Fixed                 int
+	Errors                int
+}
+
 func main() {
 	// Parse flags
 	push := flag.Bool("push", false, "Push unprocessed files to SQS for reprocessing")
@@ -123,6 +150,8 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Show detailed output for each file")
 	watch := flag.Bool("watch", false, "Watch SQS queue and CloudWatch logs (press 'q' to quit)")
 	redrive := flag.Bool("redrive", false, "Move DLQ messages back to main queue for retry")
+	orphans := flag.Bool("orphans", false, "Fix orphaned images (cross-reference S3 and DynamoDB)")
+	migrate := flag.Bool("migrate", false, "Migrate old file naming to new GUID format")
 	flag.Parse()
 
 	// If -nolimit is set, override the limit to 0 (unlimited)
@@ -144,6 +173,18 @@ func main() {
 	// Handle redrive mode separately
 	if *redrive {
 		runRedriveMode(sess, *dryRun)
+		return
+	}
+
+	// Handle orphans mode separately
+	if *orphans {
+		runOrphansMode(sess, *dryRun, *verbose)
+		return
+	}
+
+	// Handle migrate mode separately
+	if *migrate {
+		runMigrateMode(sess, *dryRun, *verbose, *limit, *noLimit)
 		return
 	}
 
@@ -701,4 +742,414 @@ func pushToSQS(client *sqs.SQS, bucket, key string, size int64, region string) e
 		MessageBody: aws.String(string(body)),
 	})
 	return err
+}
+
+// runOrphansMode cross-references S3 and DynamoDB to fix orphaned images
+func runOrphansMode(sess *session.Session, dryRun, verbose bool) {
+	s3Client := s3.New(sess)
+	ddbClient := dynamodb.New(sess)
+
+	fmt.Println("=== Orphan Detection Mode ===")
+	fmt.Printf("Bucket: %s\n", bucketName)
+	fmt.Printf("Table: %s\n", tableName)
+	fmt.Println()
+
+	stats := OrphanStats{}
+
+	// Step 1: Scan all DynamoDB records
+	fmt.Println("Step 1: Scanning DynamoDB records...")
+	ddbRecords, err := scanAllDynamoRecords(ddbClient)
+	if err != nil {
+		fmt.Printf("Error scanning DynamoDB: %v\n", err)
+		return
+	}
+	stats.TotalDynamoRecords = len(ddbRecords)
+	fmt.Printf("  Found %d DynamoDB records\n", stats.TotalDynamoRecords)
+
+	// Step 2: List all S3 files in images/ folder
+	fmt.Println("Step 2: Scanning S3 images/ folder...")
+	s3Files, err := listImagesFolder(s3Client)
+	if err != nil {
+		fmt.Printf("Error listing S3 files: %v\n", err)
+		return
+	}
+	stats.TotalS3Images = len(s3Files)
+	fmt.Printf("  Found %d S3 files in images/\n", stats.TotalS3Images)
+
+	// Create lookup maps
+	s3FileSet := make(map[string]bool)
+	for _, f := range s3Files {
+		s3FileSet[f.Key] = true
+	}
+
+	ddbByGUID := make(map[string]*ImageRecord)
+	ddbByOriginalFile := make(map[string]*ImageRecord)
+	for i := range ddbRecords {
+		rec := &ddbRecords[i]
+		ddbByGUID[rec.ImageGUID] = rec
+		if rec.OriginalFile != "" {
+			ddbByOriginalFile[rec.OriginalFile] = rec
+		}
+	}
+
+	// Step 3: Find orphaned DynamoDB records (no corresponding S3 file)
+	fmt.Println("\nStep 3: Finding orphaned DynamoDB records...")
+	var orphanedDynamoRecords []ImageRecord
+	for _, rec := range ddbRecords {
+		// Check if the main image file exists
+		if rec.OriginalFile != "" && !s3FileSet[rec.OriginalFile] {
+			// Also check if thumbnails exist
+			thumb50Exists := rec.Thumbnail50 != "" && s3FileSet[rec.Thumbnail50]
+			thumb400Exists := rec.Thumbnail400 != "" && s3FileSet[rec.Thumbnail400]
+
+			if !thumb50Exists && !thumb400Exists {
+				orphanedDynamoRecords = append(orphanedDynamoRecords, rec)
+				stats.OrphanedDynamo++
+				if verbose {
+					fmt.Printf("  [ORPHANED DDB] %s (GUID: %s)\n", rec.OriginalFile, rec.ImageGUID)
+				}
+			}
+		}
+	}
+	fmt.Printf("  Found %d orphaned DynamoDB records\n", stats.OrphanedDynamo)
+
+	// Step 4: Find orphaned S3 files (no corresponding DynamoDB record)
+	fmt.Println("\nStep 4: Finding orphaned S3 files...")
+	var orphanedS3Files []FileInfo
+	for _, f := range s3Files {
+		// Skip thumbnails - we only care about main images
+		if strings.Contains(f.Key, ".50.") || strings.Contains(f.Key, ".400.") {
+			continue
+		}
+
+		// Check if this file has a DynamoDB record
+		if _, exists := ddbByOriginalFile[f.Key]; !exists {
+			// Also try to match by GUID extracted from filename
+			guid := extractGUIDFromKey(f.Key)
+			if guid != "" {
+				if _, exists := ddbByGUID[guid]; exists {
+					continue // Found matching record by GUID
+				}
+			}
+			orphanedS3Files = append(orphanedS3Files, f)
+			stats.OrphanedS3++
+			if verbose {
+				fmt.Printf("  [ORPHANED S3] %s\n", f.Key)
+			}
+		}
+	}
+	fmt.Printf("  Found %d orphaned S3 files\n", stats.OrphanedS3)
+
+	// Summary
+	fmt.Println()
+	fmt.Println("=== Summary ===")
+	fmt.Printf("Total DynamoDB records:     %d\n", stats.TotalDynamoRecords)
+	fmt.Printf("Total S3 images:            %d\n", stats.TotalS3Images)
+	fmt.Printf("Orphaned DynamoDB records:  %d\n", stats.OrphanedDynamo)
+	fmt.Printf("Orphaned S3 files:          %d\n", stats.OrphanedS3)
+	fmt.Println()
+
+	if stats.OrphanedDynamo == 0 && stats.OrphanedS3 == 0 {
+		fmt.Println("No orphans found. Everything is in sync!")
+		return
+	}
+
+	// Fix orphans
+	if dryRun {
+		fmt.Println("DRY RUN: Would perform the following fixes:")
+		if stats.OrphanedDynamo > 0 {
+			fmt.Printf("  - Delete %d orphaned DynamoDB records\n", stats.OrphanedDynamo)
+		}
+		if stats.OrphanedS3 > 0 {
+			fmt.Printf("  - Create DynamoDB records for %d orphaned S3 files (if thumbnails exist)\n", stats.OrphanedS3)
+		}
+		fmt.Println("\nRun without -dry-run to apply fixes")
+		return
+	}
+
+	// Apply fixes
+	fmt.Println("Applying fixes...")
+
+	// Delete orphaned DynamoDB records
+	if stats.OrphanedDynamo > 0 {
+		fmt.Printf("\nDeleting %d orphaned DynamoDB records...\n", stats.OrphanedDynamo)
+		for i, rec := range orphanedDynamoRecords {
+			if (i+1)%50 == 0 {
+				fmt.Printf("  Deleted %d/%d records...\n", i+1, len(orphanedDynamoRecords))
+			}
+			_, err := ddbClient.DeleteItem(&dynamodb.DeleteItemInput{
+				TableName: aws.String(tableName),
+				Key: map[string]*dynamodb.AttributeValue{
+					"ImageGUID": {S: aws.String(rec.ImageGUID)},
+				},
+			})
+			if err != nil {
+				fmt.Printf("  Error deleting %s: %v\n", rec.ImageGUID, err)
+				stats.Errors++
+			} else {
+				stats.Fixed++
+			}
+		}
+	}
+
+	// Create DynamoDB records for orphaned S3 files that have thumbnails
+	if stats.OrphanedS3 > 0 {
+		fmt.Printf("\nProcessing %d orphaned S3 files...\n", stats.OrphanedS3)
+		for i, f := range orphanedS3Files {
+			if (i+1)%50 == 0 {
+				fmt.Printf("  Processed %d/%d files...\n", i+1, len(orphanedS3Files))
+			}
+
+			// Check if thumbnails exist for this file
+			basePath := strings.TrimSuffix(f.Key, filepath.Ext(f.Key))
+			ext := filepath.Ext(f.Key)
+			thumb50Key := basePath + ".50" + ext
+			thumb400Key := basePath + ".400" + ext
+
+			if s3FileSet[thumb50Key] && s3FileSet[thumb400Key] {
+				// Thumbnails exist, create a DynamoDB record
+				guid := extractGUIDFromKey(f.Key)
+				if guid == "" {
+					guid = uuid.New().String()
+				}
+
+				originalFilename := extractBaseName(f.Key)
+				now := time.Now().UTC().Format(time.RFC3339)
+
+				record := ImageRecord{
+					ImageGUID:        guid,
+					OriginalFile:     f.Key,
+					OriginalFilename: originalFilename,
+					Bucket:           bucketName,
+					Thumbnail50:      thumb50Key,
+					Thumbnail400:     thumb400Key,
+					Reviewed:         "false",
+				}
+
+				item, err := dynamodbattribute.MarshalMap(record)
+				if err != nil {
+					fmt.Printf("  Error marshaling record for %s: %v\n", f.Key, err)
+					stats.Errors++
+					continue
+				}
+
+				// Add timestamps
+				item["InsertedDateTime"] = &dynamodb.AttributeValue{S: aws.String(now)}
+				item["UpdatedDateTime"] = &dynamodb.AttributeValue{S: aws.String(now)}
+
+				_, err = ddbClient.PutItem(&dynamodb.PutItemInput{
+					TableName: aws.String(tableName),
+					Item:      item,
+				})
+				if err != nil {
+					fmt.Printf("  Error creating record for %s: %v\n", f.Key, err)
+					stats.Errors++
+				} else {
+					stats.Fixed++
+					if verbose {
+						fmt.Printf("  Created DynamoDB record for %s (GUID: %s)\n", f.Key, guid)
+					}
+				}
+			} else {
+				if verbose {
+					fmt.Printf("  Skipping %s (no thumbnails found)\n", f.Key)
+				}
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("=== Fix Complete ===\n")
+	fmt.Printf("Records fixed: %d\n", stats.Fixed)
+	if stats.Errors > 0 {
+		fmt.Printf("Errors: %d\n", stats.Errors)
+	}
+}
+
+// runMigrateMode migrates old file naming to new GUID format
+func runMigrateMode(sess *session.Session, dryRun, verbose bool, limit int, noLimit bool) {
+	s3Client := s3.New(sess)
+	_ = dynamodb.New(sess) // May be used for future validation
+	sqsClient := sqs.New(sess)
+
+	fmt.Println("=== File Migration Mode ===")
+	fmt.Printf("Bucket: %s\n", bucketName)
+	fmt.Printf("Table: %s\n", tableName)
+	fmt.Println()
+	fmt.Println("This will find files NOT in images/ folder and reprocess them with new GUID naming.")
+	fmt.Println()
+
+	// Find files that need migration (not in images/ folder, not in incoming/)
+	fmt.Println("Scanning for files that need migration...")
+
+	var toMigrate []FileInfo
+	prefixes := []string{"approved/", "rejected/", "unreviewed/"}
+
+	for _, prefix := range prefixes {
+		files, err := listFilesWithPrefix(s3Client, prefix)
+		if err != nil {
+			fmt.Printf("Error listing %s: %v\n", prefix, err)
+			continue
+		}
+
+		for _, f := range files {
+			// Skip thumbnails
+			if strings.Contains(f.Key, ".50.") || strings.Contains(f.Key, ".400.") {
+				continue
+			}
+			// Only JPG files
+			if isJPGFile(f.Key) {
+				toMigrate = append(toMigrate, f)
+			}
+		}
+	}
+
+	fmt.Printf("Found %d files to migrate\n", len(toMigrate))
+
+	if len(toMigrate) == 0 {
+		fmt.Println("No files need migration. All files are already in the new format!")
+		return
+	}
+
+	// Apply limit
+	if !noLimit && limit > 0 && len(toMigrate) > limit {
+		fmt.Printf("Limiting to first %d files (use -nolimit to process all)\n", limit)
+		toMigrate = toMigrate[:limit]
+	}
+
+	fmt.Println()
+	fmt.Println("Files to migrate (first 20):")
+	showCount := 20
+	if len(toMigrate) < showCount {
+		showCount = len(toMigrate)
+	}
+	for i := 0; i < showCount; i++ {
+		f := toMigrate[i]
+		fmt.Printf("  %s (%.2f MB)\n", f.Key, float64(f.Size)/(1024*1024))
+	}
+	if len(toMigrate) > showCount {
+		fmt.Printf("  ... and %d more\n", len(toMigrate)-showCount)
+	}
+	fmt.Println()
+
+	if dryRun {
+		fmt.Printf("DRY RUN: Would push %d files to SQS for reprocessing with new GUID naming\n", len(toMigrate))
+		return
+	}
+
+	// Push files to SQS for reprocessing
+	fmt.Printf("Pushing %d files to SQS for migration...\n", len(toMigrate))
+	pushed := 0
+	errors := 0
+
+	for i, f := range toMigrate {
+		if (i+1)%50 == 0 {
+			fmt.Printf("  Pushed %d/%d files...\n", i+1, len(toMigrate))
+		}
+
+		err := pushToSQS(sqsClient, bucketName, f.Key, f.Size, awsRegion)
+		if err != nil {
+			if verbose {
+				fmt.Printf("  Error pushing %s: %v\n", f.Key, err)
+			}
+			errors++
+		} else {
+			pushed++
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("=== Migration Started ===\n")
+	fmt.Printf("Files pushed to SQS: %d\n", pushed)
+	if errors > 0 {
+		fmt.Printf("Errors: %d\n", errors)
+	}
+	fmt.Println("\nFiles will be reprocessed with new GUID naming format.")
+	fmt.Println("Use -watch to monitor progress.")
+}
+
+// scanAllDynamoRecords scans all records from DynamoDB
+func scanAllDynamoRecords(client *dynamodb.DynamoDB) ([]ImageRecord, error) {
+	var records []ImageRecord
+	var lastKey map[string]*dynamodb.AttributeValue
+
+	for {
+		input := &dynamodb.ScanInput{
+			TableName:         aws.String(tableName),
+			ExclusiveStartKey: lastKey,
+		}
+
+		result, err := client.Scan(input)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, item := range result.Items {
+			var rec ImageRecord
+			if err := dynamodbattribute.UnmarshalMap(item, &rec); err != nil {
+				continue // Skip invalid records
+			}
+			records = append(records, rec)
+		}
+
+		lastKey = result.LastEvaluatedKey
+		if lastKey == nil {
+			break
+		}
+
+		fmt.Printf("  Scanned %d records so far...\n", len(records))
+	}
+
+	return records, nil
+}
+
+// listImagesFolder lists all files in the images/ folder
+func listImagesFolder(client *s3.S3) ([]FileInfo, error) {
+	return listFilesWithPrefix(client, "images/")
+}
+
+// listFilesWithPrefix lists all files with a given prefix
+func listFilesWithPrefix(client *s3.S3, prefix string) ([]FileInfo, error) {
+	var files []FileInfo
+
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+		Prefix: aws.String(prefix),
+	}
+
+	err := client.ListObjectsV2Pages(input, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		for _, obj := range page.Contents {
+			key := *obj.Key
+			// Skip directories
+			if strings.HasSuffix(key, "/") {
+				continue
+			}
+
+			files = append(files, FileInfo{
+				Key:          key,
+				Size:         *obj.Size,
+				LastModified: *obj.LastModified,
+				BaseName:     extractBaseName(key),
+			})
+		}
+		return true
+	})
+
+	return files, err
+}
+
+// extractGUIDFromKey extracts a UUID from a file key like "images/abc-123-def.jpg"
+func extractGUIDFromKey(key string) string {
+	filename := filepath.Base(key)
+	// Remove extension
+	name := strings.TrimSuffix(filename, filepath.Ext(filename))
+	// Remove thumbnail suffixes
+	name = strings.TrimSuffix(name, ".50")
+	name = strings.TrimSuffix(name, ".400")
+
+	// Check if it looks like a UUID (36 chars with hyphens)
+	if len(name) == 36 && strings.Count(name, "-") == 4 {
+		return name
+	}
+	return ""
 }
