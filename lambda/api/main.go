@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1979,6 +1980,11 @@ func handleListProjects(request events.APIGatewayProxyRequest, headers map[strin
 
 		projects = append(projects, p)
 	}
+
+	// Sort projects alphabetically by name (case-insensitive)
+	sort.Slice(projects, func(i, j int) bool {
+		return strings.ToLower(projects[i].Name) < strings.ToLower(projects[j].Name)
+	})
 
 	body, _ := json.Marshal(projects)
 	return events.APIGatewayProxyResponse{
