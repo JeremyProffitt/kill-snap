@@ -107,8 +107,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   // Filter state
   const [stateFilter, setStateFilter] = useState<StateFilter>(preferences.defaultStatusFilter as StateFilter);
   const [groupFilter, setGroupFilter] = useState<number | 'all'>(preferences.defaultColorFilter);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [filenameSearch, setFilenameSearch] = useState('');
+  const [keywordSearch, setKeywordSearch] = useState('');
+  const [debouncedFilename, setDebouncedFilename] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
   
   // Project state
   const [projects, setProjects] = useState<Project[]>([]);
@@ -119,6 +121,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   
   // UI state
   const [hoverRating, setHoverRating] = useState<{ imageGUID: string; stars: number } | null>(null);
@@ -164,11 +167,16 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const galleryRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Debounce search input
+  // Debounce search inputs
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    const timer = setTimeout(() => setDebouncedFilename(filenameSearch), 300);
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [filenameSearch]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedKeyword(keywordSearch), 300);
+    return () => clearTimeout(timer);
+  }, [keywordSearch]);
 
   // Apply theme colors as CSS variables
   useEffect(() => {
@@ -210,7 +218,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
   const loadProjects = useCallback(async () => {
     try {
-      const data = await api.getProjects();
+      // Always fetch all projects including archived so we can filter in frontend
+      const data = await api.getProjects(true);
       setProjects(data);
     } catch (err: any) {
       console.error('Failed to load projects:', err);
@@ -294,17 +303,37 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     return counts;
   }, [images]);
 
-  // Filter images by search query
-  const searchFilteredImages = useMemo(() => {
-    if (!debouncedSearch) return images;
+  // Filter projects: active (non-archived) and check if any archived exist
+  const activeProjects = useMemo(() =>
+    projects.filter(p => !p.archived),
+    [projects]
+  );
+  const hasArchivedProjects = useMemo(() =>
+    projects.some(p => p.archived),
+    [projects]
+  );
+  // Get projects to show in dropdowns based on showArchivedProjects toggle
+  const visibleProjects = useMemo(() =>
+    showArchivedProjects ? projects : activeProjects,
+    [projects, activeProjects, showArchivedProjects]
+  );
 
-    return images.filter(img => {
-      if (fuzzyMatch(img.originalFile, debouncedSearch)) return true;
-      if (img.keywords?.some(kw => fuzzyMatch(kw, debouncedSearch))) return true;
-      if (img.description && fuzzyMatch(img.description, debouncedSearch)) return true;
-      return false;
-    });
-  }, [images, debouncedSearch]);
+  // Filter images by search queries (filename and keyword separately)
+  const searchFilteredImages = useMemo(() => {
+    let result = images;
+
+    if (debouncedFilename) {
+      result = result.filter(img => fuzzyMatch(img.originalFile, debouncedFilename));
+    }
+
+    if (debouncedKeyword) {
+      result = result.filter(img =>
+        img.keywords?.some(kw => fuzzyMatch(kw, debouncedKeyword))
+      );
+    }
+
+    return result;
+  }, [images, debouncedFilename, debouncedKeyword]);
 
   // Calculate date counts from filtered images
   const dateCounts = useMemo(() => {
@@ -1251,21 +1280,40 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           {!sidebarCollapsed && (
             <>
               <div className="sidebar-section search-section">
-                <div className="search-container">
+                <label className="search-label">Filename</label>
+                <div className="search-input-wrapper">
                   <input
                     ref={searchInputRef}
-                    id="search-input"
                     type="text"
-                    placeholder="Search... (Press /)"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search filename..."
+                    value={filenameSearch}
+                    onChange={(e) => setFilenameSearch(e.target.value)}
                     className="search-input"
                   />
-                  {searchQuery && (
+                  {filenameSearch && (
                     <button
-                      className="search-clear"
-                      onClick={() => setSearchQuery('')}
-                      title="Clear search"
+                      className="search-clear-btn"
+                      onClick={() => setFilenameSearch('')}
+                      title="Clear"
+                    >
+                      x
+                    </button>
+                  )}
+                </div>
+                <label className="search-label">Keyword</label>
+                <div className="search-input-wrapper">
+                  <input
+                    type="text"
+                    placeholder="Search keywords..."
+                    value={keywordSearch}
+                    onChange={(e) => setKeywordSearch(e.target.value)}
+                    className="search-input"
+                  />
+                  {keywordSearch && (
+                    <button
+                      className="search-clear-btn"
+                      onClick={() => setKeywordSearch('')}
+                      title="Clear"
                     >
                       x
                     </button>
@@ -1313,12 +1361,22 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   className="sidebar-select"
                 >
                   <option value="">Inbox</option>
-                  {projects.map((project) => (
+                  {visibleProjects.map((project) => (
                     <option key={project.projectId} value={project.projectId}>
-                      {project.name} ({project.imageCount})
+                      {project.name} ({project.imageCount}){project.archived ? ' [Archived]' : ''}
                     </option>
                   ))}
                 </select>
+                {hasArchivedProjects && (
+                  <label className="show-archived-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={showArchivedProjects}
+                      onChange={(e) => setShowArchivedProjects(e.target.checked)}
+                    />
+                    <span>Show archived projects</span>
+                  </label>
+                )}
               </div>
 
               {!selectedProject && (
@@ -1389,7 +1447,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                       className="sidebar-select"
                     >
                       <option value="">Select Project...</option>
-                      {projects.map((project) => (
+                      {activeProjects.map((project) => (
                         <option key={project.projectId} value={project.projectId}>
                           {project.name}
                         </option>

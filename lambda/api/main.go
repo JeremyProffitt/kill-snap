@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +125,7 @@ type Project struct {
 	ImageCount int       `json:"imageCount" dynamodbav:"ImageCount"`
 	Keywords   []string  `json:"keywords,omitempty" dynamodbav:"Keywords,omitempty"`
 	ZipFiles   []ZipFile `json:"zipFiles,omitempty" dynamodbav:"ZipFiles,omitempty"`
+	Archived   bool      `json:"archived,omitempty" dynamodbav:"Archived,omitempty"`
 }
 
 // ZipFile represents a generated zip file for a project
@@ -143,6 +145,7 @@ type CreateProjectRequest struct {
 type UpdateProjectRequest struct {
 	Name     string   `json:"name,omitempty"`
 	Keywords []string `json:"keywords,omitempty"`
+	Archived *bool    `json:"archived,omitempty"`
 }
 
 type AddToProjectRequest struct {
@@ -598,6 +601,13 @@ func deleteImageFromDB(imageGUID string) error {
 	return nil
 }
 
+// OpenAI rate limit retry configuration
+const (
+	openaiMaxRetries     = 5
+	openaiBaseRetryDelay = 2 * time.Second
+	openaiMaxRetryDelay  = 60 * time.Second
+)
+
 // analyzeImageWithGPT4o sends the image to OpenAI GPT-4o for keyword and description generation
 func analyzeImageWithGPT4o(bucket, thumbnailKey string) (*AIAnalysisResult, error) {
 	if openaiAPIKey == "" {
@@ -665,24 +675,55 @@ Respond in JSON format exactly like this:
 		return nil, fmt.Errorf("failed to marshal OpenAI request: %v", err)
 	}
 
-	// Make HTTP request to OpenAI
-	httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
-
+	// Make HTTP request to OpenAI with retry logic for rate limits
+	var resp *http.Response
+	var respBody []byte
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("OpenAI API request failed: %v", err)
-	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read OpenAI response: %v", err)
+	for attempt := 0; attempt <= openaiMaxRetries; attempt++ {
+		httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(reqBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP request: %v", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
+
+		resp, err = client.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("OpenAI API request failed: %v", err)
+		}
+
+		respBody, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read OpenAI response: %v", err)
+		}
+
+		// Check for rate limit (429) or server errors (5xx)
+		if resp.StatusCode == 429 || (resp.StatusCode >= 500 && resp.StatusCode < 600) {
+			if attempt < openaiMaxRetries {
+				// Calculate delay with exponential backoff
+				delay := openaiBaseRetryDelay * time.Duration(1<<uint(attempt))
+				if delay > openaiMaxRetryDelay {
+					delay = openaiMaxRetryDelay
+				}
+
+				// Check for Retry-After header
+				if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+					if seconds, err := strconv.Atoi(retryAfter); err == nil {
+						delay = time.Duration(seconds) * time.Second
+					}
+				}
+
+				fmt.Printf("OpenAI rate limited (status %d), retrying in %v (attempt %d/%d)\n",
+					resp.StatusCode, delay, attempt+1, openaiMaxRetries)
+				time.Sleep(delay)
+				continue
+			}
+		}
+
+		// Success or non-retryable error
+		break
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -944,12 +985,142 @@ func getColorName(groupNumber int) string {
 	return "none"
 }
 
+// ScheduledEvent represents an EventBridge scheduled event
+type ScheduledEvent struct {
+	Source     string `json:"source"`
+	DetailType string `json:"detail-type"`
+	Detail     struct {
+		Action string `json:"action"`
+	} `json:"detail"`
+}
+
+// BackfillConfig controls the nightly keyword backfill
+const (
+	backfillBatchSize    = 50 // Max images to process per run
+	backfillDelayBetween = 2 * time.Second // Delay between API calls
+)
+
+// handleBackfillKeywords processes images without keywords
+func handleBackfillKeywords() error {
+	if openaiAPIKey == "" {
+		fmt.Println("Backfill: OpenAI API key not configured, skipping")
+		return nil
+	}
+
+	fmt.Println("Starting keyword backfill for images without keywords...")
+
+	// Scan for images without description (which means no AI analysis was done)
+	// We scan for Description being empty or not existing
+	scanInput := &dynamodb.ScanInput{
+		TableName: aws.String(imageTable),
+		FilterExpression: aws.String("attribute_not_exists(Description) OR Description = :empty"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":empty": {S: aws.String("")},
+		},
+		Limit: aws.Int64(backfillBatchSize),
+	}
+
+	result, err := ddbClient.Scan(scanInput)
+	if err != nil {
+		return fmt.Errorf("failed to scan for images without keywords: %v", err)
+	}
+
+	fmt.Printf("Backfill: Found %d images without keywords to process\n", len(result.Items))
+
+	processedCount := 0
+	errorCount := 0
+
+	for _, item := range result.Items {
+		var img ImageResponse
+		if err := dynamodbattribute.UnmarshalMap(item, &img); err != nil {
+			fmt.Printf("Backfill: Failed to unmarshal image: %v\n", err)
+			errorCount++
+			continue
+		}
+
+		fmt.Printf("Backfill: Processing image %s (%s)\n", img.ImageGUID, img.OriginalFile)
+
+		// Call GPT-4o to analyze the image
+		aiResult, err := analyzeImageWithGPT4o(img.Bucket, img.Thumbnail400)
+		if err != nil {
+			fmt.Printf("Backfill: AI analysis failed for %s: %v\n", img.ImageGUID, err)
+			errorCount++
+			// Continue to next image instead of stopping
+			time.Sleep(backfillDelayBetween)
+			continue
+		}
+
+		// Update the image with AI results
+		now := time.Now().Format(time.RFC3339)
+		updateExpr := "SET UpdatedDateTime = :updated, Description = :desc"
+		exprAttrValues := map[string]*dynamodb.AttributeValue{
+			":updated": {S: aws.String(now)},
+			":desc":    {S: aws.String(aiResult.Description)},
+		}
+
+		if len(aiResult.Keywords) > 0 {
+			updateExpr += ", Keywords = :keywords"
+			keywordsList := make([]*dynamodb.AttributeValue, len(aiResult.Keywords))
+			for i, kw := range aiResult.Keywords {
+				keywordsList[i] = &dynamodb.AttributeValue{S: aws.String(kw)}
+			}
+			exprAttrValues[":keywords"] = &dynamodb.AttributeValue{L: keywordsList}
+		}
+
+		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(imageTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ImageGUID": {S: aws.String(img.ImageGUID)},
+			},
+			UpdateExpression:          aws.String(updateExpr),
+			ExpressionAttributeValues: exprAttrValues,
+		})
+
+		if err != nil {
+			fmt.Printf("Backfill: Failed to update image %s: %v\n", img.ImageGUID, err)
+			errorCount++
+		} else {
+			fmt.Printf("Backfill: Successfully added keywords to %s\n", img.ImageGUID)
+			processedCount++
+		}
+
+		// Add delay between API calls to avoid rate limits
+		time.Sleep(backfillDelayBetween)
+	}
+
+	fmt.Printf("Backfill complete: %d processed, %d errors\n", processedCount, errorCount)
+	return nil
+}
+
 func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	headers := map[string]string{
 		"Content-Type":                "application/json",
 		"Access-Control-Allow-Origin": "*",
 		"Access-Control-Allow-Headers": "Content-Type,Authorization",
 		"Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+	}
+
+	// Check if this is a scheduled event (EventBridge)
+	// When invoked by EventBridge, the request will have empty HTTP method and path
+	// but the body will contain the scheduled event details
+	if request.HTTPMethod == "" && request.Path == "" && request.Body != "" {
+		var scheduledEvent ScheduledEvent
+		if err := json.Unmarshal([]byte(request.Body), &scheduledEvent); err == nil {
+			if scheduledEvent.Source == "aws.events" || scheduledEvent.DetailType == "Scheduled Event" {
+				fmt.Println("Received scheduled event, running keyword backfill...")
+				if err := handleBackfillKeywords(); err != nil {
+					fmt.Printf("Backfill error: %v\n", err)
+					return events.APIGatewayProxyResponse{
+						StatusCode: 500,
+						Body:       fmt.Sprintf(`{"error": "%s"}`, err.Error()),
+					}, nil
+				}
+				return events.APIGatewayProxyResponse{
+					StatusCode: 200,
+					Body:       `{"message": "Backfill completed"}`,
+				}, nil
+			}
+		}
 	}
 
 	// Check if this is an async move request (direct Lambda invocation)
@@ -1007,7 +1178,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 		return handleDeleteImage(imageID, headers)
 	// Project routes
 	case path == "/api/projects" && method == "GET":
-		return handleListProjects(headers)
+		return handleListProjects(request, headers)
 	case path == "/api/projects" && method == "POST":
 		return handleCreateProject(request, headers)
 	case strings.HasPrefix(path, "/api/projects/") && !strings.Contains(path[len("/api/projects/"):], "/") && method == "PUT":
@@ -1713,7 +1884,10 @@ func handleUndeleteImage(imageID string, headers map[string]string) (events.APIG
 
 // Project handlers
 
-func handleListProjects(headers map[string]string) (events.APIGatewayProxyResponse, error) {
+func handleListProjects(request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	// Check if we should include archived projects
+	includeArchived := request.QueryStringParameters["includeArchived"] == "true"
+
 	result, err := ddbClient.Scan(&dynamodb.ScanInput{
 		TableName: aws.String(projectsTable),
 	})
@@ -1726,6 +1900,11 @@ func handleListProjects(headers map[string]string) (events.APIGatewayProxyRespon
 	for _, item := range result.Items {
 		var p Project
 		dynamodbattribute.UnmarshalMap(item, &p)
+
+		// Skip archived projects unless specifically requested
+		if p.Archived && !includeArchived {
+			continue
+		}
 
 		// Calculate actual image count from images table
 		actualCount := getProjectImageCount(p.ProjectID)
@@ -1868,6 +2047,13 @@ func handleUpdateProject(projectID string, request events.APIGatewayProxyRequest
 			updateExpr += " REMOVE Keywords"
 		}
 		project.Keywords = req.Keywords
+	}
+
+	// Update archived status if provided
+	if req.Archived != nil {
+		updateExpr += ", Archived = :archived"
+		exprAttrValues[":archived"] = &dynamodb.AttributeValue{BOOL: aws.Bool(*req.Archived)}
+		project.Archived = *req.Archived
 	}
 
 	updateInput := &dynamodb.UpdateItemInput{

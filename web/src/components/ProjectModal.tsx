@@ -49,6 +49,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [renamingProject, setRenamingProject] = useState(false);
+  const [archivingProject, setArchivingProject] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
     isActive: false,
     currentFile: '',
@@ -299,6 +300,22 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     }
   };
 
+  const handleToggleArchive = async () => {
+    if (!selectedProject || !currentProject) return;
+
+    setArchivingProject(true);
+    try {
+      await api.updateProjectArchived(selectedProject, !currentProject.archived);
+      await onProjectCreated();
+    } catch (err: any) {
+      console.error('Failed to toggle archive status:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to update archive status';
+      alert(`Error: ${errorMsg}`);
+    } finally {
+      setArchivingProject(false);
+    }
+  };
+
   const handleRenameDialogBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       setShowRenameDialog(false);
@@ -434,7 +451,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   >
                     {existingProjects.map((project) => (
                       <option key={project.projectId} value={project.projectId}>
-                        {project.name}
+                        {project.name}{project.archived ? ' [Archived]' : ''}
                       </option>
                     ))}
                   </select>
@@ -456,12 +473,24 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   >
                     Rename
                   </button>
+                  <button
+                    type="button"
+                    className={`archive-project-btn ${currentProject?.archived ? 'archived' : ''}`}
+                    onClick={handleToggleArchive}
+                    disabled={loading || archivingProject || !selectedProject}
+                    title={currentProject?.archived ? 'Unarchive project' : 'Archive project'}
+                  >
+                    {archivingProject ? '...' : currentProject?.archived ? 'Unarchive' : 'Archive'}
+                  </button>
                 </div>
                 {currentProject && (
                   <div className="project-info-row">
                     <span className="project-date">
                       Created: {new Date(currentProject.createdAt).toLocaleDateString()}
                     </span>
+                    {currentProject.archived && (
+                      <span className="project-archived-badge">Archived</span>
+                    )}
                     <span className="project-count">{currentProject.imageCount} images</span>
                   </div>
                 )}

@@ -177,6 +177,62 @@
   box-shadow: none;
 }
 
+.archive-project-btn {
+  width: 100px;
+  padding: 0.75rem 0;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7f8c8d 0%, #6c7a89 100%);
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  text-align: center;
+  box-shadow: 0 4px 15px rgba(127, 140, 141, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.archive-project-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(127, 140, 141, 0.5);
+}
+
+.archive-project-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(127, 140, 141, 0.4);
+}
+
+.archive-project-btn.archived {
+  background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%);
+  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4);
+}
+
+.archive-project-btn.archived:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+  box-shadow: 0 6px 20px rgba(39, 174, 96, 0.5);
+}
+
+.archive-project-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.project-archived-badge {
+  background: rgba(127, 140, 141, 0.3);
+  color: #95a5a6;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .project-btn {
   padding: 0.875rem;
   border: none;
@@ -778,7 +834,8 @@
   }
 
   .add-project-btn,
-  .rename-project-btn {
+  .rename-project-btn,
+  .archive-project-btn {
     width: 100%;
   }
 }

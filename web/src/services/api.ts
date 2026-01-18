@@ -113,10 +113,11 @@ export const api = {
     return `https://${bucket}.s3.amazonaws.com/${key}`;
   },
 
-  async getProjects(): Promise<Project[]> {
+  async getProjects(includeArchived?: boolean): Promise<Project[]> {
+    const params = includeArchived ? '?includeArchived=true' : '';
     const response = await withRetry(() =>
       axios.get<Project[]>(
-        `${API_BASE_URL}/api/projects`,
+        `${API_BASE_URL}/api/projects${params}`,
         { headers: authService.getAuthHeader() }
       )
     );
@@ -284,6 +285,16 @@ export const api = {
       axios.put(
         `${API_BASE_URL}/api/projects/${projectId}`,
         { name },
+        { headers: authService.getAuthHeader() }
+      )
+    );
+  },
+
+  async updateProjectArchived(projectId: string, archived: boolean): Promise<void> {
+    await withRetry(() =>
+      axios.put(
+        `${API_BASE_URL}/api/projects/${projectId}`,
+        { archived },
         { headers: authService.getAuthHeader() }
       )
     );

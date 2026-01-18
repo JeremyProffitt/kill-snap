@@ -48,6 +48,7 @@ export interface Project {
   createdAt: string;
   imageCount: number;
   zipFiles?: ZipFile[];
+  archived?: boolean;
 }
 
 export interface ZipFile {

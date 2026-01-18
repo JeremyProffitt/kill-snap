@@ -149,7 +149,7 @@ Resources:
       Runtime: provided.al2023
       CodeUri: lambda/thumbnail/
       Handler: bootstrap
-      MemorySize: 512
+      MemorySize: 1536
       Timeout: 90
       Environment:
         Variables:
@@ -438,6 +438,14 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/images/{imageId}/regenerate-ai
             Method: POST
+        # Keyword backfill for images without AI analysis - runs every 15 minutes
+        KeywordBackfill:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Description: Backfill keywords for images that don't have AI analysis
+            Enabled: true
+            Input: '{"source": "aws.events", "detail-type": "Scheduled Event", "detail": {"action": "backfill-keywords"}}'
 
   # CloudFront Origin Access Control
   CloudFrontOAC:
