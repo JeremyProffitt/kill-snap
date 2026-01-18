@@ -423,6 +423,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     setFocusedImageIndex(null);
   }, []);
 
+  const removeFromSelection = useCallback((imageGUIDs: string[]) => {
+    setSelectedImages(prev => {
+      const next = new Set(prev);
+      imageGUIDs.forEach(id => next.delete(id));
+      return next;
+    });
+  }, []);
+
   const selectAllInDateGroup = useCallback((dateImages: Image[]) => {
     const newSelection = new Set(selectedImages);
     dateImages.forEach(img => newSelection.add(img.imageGUID));
@@ -506,12 +514,14 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
     if (willRemove) {
       setImages(prev => prev.filter(img => img.imageGUID !== imageId));
+      removeFromSelection([imageId]);
     } else {
       if (action === 'approve' && groupNumber !== undefined) {
         const colorName = GROUP_COLORS.find(g => g.number === groupNumber)?.name.toLowerCase() || 'white';
         handlePropertyChange(imageId, { groupNumber, colorCode: colorName });
       } else if (action === 'delete') {
         handlePropertyChange(imageId, { status: 'deleted' });
+        removeFromSelection([imageId]);
       } else if (action === 'undelete') {
         handlePropertyChange(imageId, { status: 'inbox' });
       }
@@ -567,7 +577,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
         return next;
       });
     }
-  }, [processingIds, selectedProject, groupFilter, stateFilter, images, handlePropertyChange, showNotification]);
+  }, [processingIds, selectedProject, groupFilter, stateFilter, images, handlePropertyChange, showNotification, removeFromSelection]);
 
   // Bulk action handlers
   const performBulkApprove = useCallback(async (imagesToProcess: Image[], groupNumber: number) => {
@@ -789,6 +799,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
     if (willRemove) {
       setImages(prev => prev.filter(img => !imageIds.includes(img.imageGUID)));
+      removeFromSelection(imageIds);
     } else {
       imagesToProcess.forEach(img => {
         if (action === 'approve' && groupNumber !== undefined) {
@@ -798,6 +809,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
           handlePropertyChange(img.imageGUID, { status: 'deleted' });
         }
       });
+      // Remove deleted images from selection even if not removed from view
+      if (action === 'delete') {
+        removeFromSelection(imageIds);
+      }
     }
 
     const results = await Promise.allSettled(
@@ -835,7 +850,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       imageIds.forEach(id => next.delete(id));
       return next;
     });
-  }, [processingIds, selectedProject, groupFilter, stateFilter, handlePropertyChange, showNotification, loadImages]);
+  }, [processingIds, selectedProject, groupFilter, stateFilter, handlePropertyChange, showNotification, loadImages, removeFromSelection]);
 
   // Thumbnail rating handler
   const handleThumbnailRating = useCallback(async (e: React.MouseEvent, image: Image, stars: number) => {
