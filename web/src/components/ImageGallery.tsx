@@ -47,6 +47,15 @@ const getFilename = (path: string): string => {
   return parts[parts.length - 1];
 };
 
+// Get display filename - prioritizes originalFilename, falls back to extracting from originalFile
+const getDisplayFilename = (image: Image): string => {
+  if (image.originalFilename) {
+    // Add .jpg extension for display since originalFilename doesn't include it
+    return image.originalFilename + '.jpg';
+  }
+  return getFilename(image.originalFile);
+};
+
 // Extract date from image (prefer EXIF DateTimeOriginal, fall back to InsertedDateTime)
 const getImageDate = (image: Image): string => {
   if (image.exifData?.DateTimeOriginal) {
@@ -323,7 +332,10 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     let result = images;
 
     if (debouncedFilename) {
-      result = result.filter(img => fuzzyMatch(img.originalFile, debouncedFilename));
+      result = result.filter(img =>
+        fuzzyMatch(img.originalFilename || '', debouncedFilename) ||
+        fuzzyMatch(getFilename(img.originalFile), debouncedFilename)
+      );
     }
 
     if (debouncedKeyword) {
@@ -369,7 +381,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     const sortedDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
     sortedDates.forEach(date => {
       const sortedImages = dateMap[date].sort((a, b) =>
-        getFilename(a.originalFile).localeCompare(getFilename(b.originalFile))
+        getDisplayFilename(a).localeCompare(getDisplayFilename(b))
       );
       groups.push({ date, images: sortedImages });
     });
@@ -1683,7 +1695,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                         </div>
                         <div className="image-info">
                           <div className="info-row-1">
-                            <span className="thumb-filename">{getFilename(image.originalFile)}</span>
+                            <span className="thumb-filename">{getDisplayFilename(image)}</span>
                             <span className="thumb-size-info">
                               {image.width}x{image.height} - {formatFileSize(image.fileSize)}
                             </span>

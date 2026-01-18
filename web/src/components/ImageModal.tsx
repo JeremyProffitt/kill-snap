@@ -40,6 +40,14 @@ const getFilename = (path: string): string => {
   return parts[parts.length - 1];
 };
 
+// Get display filename - prioritizes originalFilename, falls back to extracting from originalFile
+const getDisplayFilename = (image: Image): string => {
+  if (image.originalFilename) {
+    return image.originalFilename + '.jpg';
+  }
+  return getFilename(image.originalFile);
+};
+
 export const ImageModal: React.FC<ImageModalProps> = ({
   image,
   images,
@@ -460,7 +468,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
 
           <div className="image-info-bar">
             <div className="info-left">
-              <span className="info-filename">{getFilename(image.originalFile)}</span>
+              <span className="info-filename">{getDisplayFilename(image)}</span>
             </div>
             <div className="info-right">
               <span className="info-dimensions">{image.width}x{image.height} - {formatFileSize(image.fileSize)}</span>

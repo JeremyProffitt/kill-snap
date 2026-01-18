@@ -30,7 +30,9 @@ import (
 
 type ImageMetadata struct {
 	ImageGUID        string            `json:"ImageGUID"`
-	OriginalFile     string            `json:"OriginalFile"`
+	OriginalFile     string            `json:"OriginalFile"`     // S3 key (UUID-based: images/{uuid}.jpg)
+	OriginalFilename string            `json:"OriginalFilename"` // Original base filename without extension (e.g., "IMG_0001")
+	RawFile          string            `json:"RawFile,omitempty"` // S3 key of linked RAW file (e.g., images/{uuid}.CR2)
 	Bucket           string            `json:"Bucket"`
 	Thumbnail50      string            `json:"Thumbnail50"`
 	Thumbnail400     string            `json:"Thumbnail400"`
@@ -105,9 +107,41 @@ var (
 )
 
 const (
-	circuitBreakerThreshold = 5                // Open circuit after 5 consecutive failures
-	circuitBreakerReset     = 5 * time.Minute  // Reset circuit after 5 minutes
+	circuitBreakerThreshold = 5               // Open circuit after 5 consecutive failures
+	circuitBreakerReset     = 5 * time.Minute // Reset circuit after 5 minutes
 )
+
+// Supported RAW file extensions (case-insensitive)
+var rawExtensions = map[string]bool{
+	".cr2": true, ".cr3": true, // Canon
+	".nef": true, ".nrw": true, // Nikon
+	".arw": true, ".srf": true, ".sr2": true, // Sony
+	".orf": true,         // Olympus
+	".rw2": true,         // Panasonic
+	".raf": true,         // Fujifilm
+	".dng": true,         // Adobe DNG / various
+	".pef": true,         // Pentax
+	".raw": true,         // Generic
+	".rwl": true,         // Leica
+	".3fr": true,         // Hasselblad
+	".fff": true,         // Hasselblad
+	".iiq": true,         // Phase One
+	".erf": true,         // Epson
+	".mrw": true,         // Minolta
+	".x3f": true,         // Sigma
+}
+
+// isRawFile checks if the file extension indicates a RAW file
+func isRawFile(key string) bool {
+	ext := strings.ToLower(filepath.Ext(key))
+	return rawExtensions[ext]
+}
+
+// isJpgFile checks if the file extension indicates a JPEG file
+func isJpgFile(key string) bool {
+	ext := strings.ToLower(filepath.Ext(key))
+	return ext == ".jpg" || ext == ".jpeg"
+}
 
 func init() {
 	sess := session.Must(session.NewSession())
@@ -149,19 +183,26 @@ func recordOpenAIFailure() {
 	}
 }
 
-// checkIdempotency checks if an image with this S3 key has already been processed
+// checkIdempotency checks if an image with this base filename has already been processed
+// Uses the OriginalFilenameIndex GSI for efficient lookup
 func checkIdempotency(bucket, key string) (bool, string, error) {
-	// Query by OriginalFile to see if we already processed this
-	result, err := ddbClient.Scan(&dynamodb.ScanInput{
-		TableName:        aws.String(tableName),
-		FilterExpression: aws.String("OriginalFile = :key"),
+	// Extract base filename (without path and extension) for matching
+	baseName := extractBaseName(key)
+
+	// Query by OriginalFilename using GSI
+	result, err := ddbClient.Query(&dynamodb.QueryInput{
+		TableName:              aws.String(tableName),
+		IndexName:              aws.String("OriginalFilenameIndex"),
+		KeyConditionExpression: aws.String("OriginalFilename = :baseName"),
 		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":key": {S: aws.String(key)},
+			":baseName": {S: aws.String(baseName)},
 		},
 		Limit: aws.Int64(1),
 	})
 	if err != nil {
-		return false, "", err
+		// Fall back to scan if GSI doesn't exist yet
+		fmt.Printf("GSI query failed in idempotency check, falling back to scan: %v\n", err)
+		return checkIdempotencyScan(baseName)
 	}
 	if len(result.Items) > 0 {
 		// Already processed
@@ -171,6 +212,106 @@ func checkIdempotency(bucket, key string) (bool, string, error) {
 		}
 	}
 	return false, "", nil
+}
+
+// checkIdempotencyScan is a fallback for when the GSI doesn't exist
+func checkIdempotencyScan(baseName string) (bool, string, error) {
+	result, err := ddbClient.Scan(&dynamodb.ScanInput{
+		TableName:        aws.String(tableName),
+		FilterExpression: aws.String("OriginalFilename = :baseName"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":baseName": {S: aws.String(baseName)},
+		},
+		Limit: aws.Int64(1),
+	})
+	if err != nil {
+		return false, "", err
+	}
+	if len(result.Items) > 0 {
+		var meta ImageMetadata
+		if err := dynamodbattribute.UnmarshalMap(result.Items[0], &meta); err == nil {
+			return true, meta.ImageGUID, nil
+		}
+	}
+	return false, "", nil
+}
+
+// extractBaseName extracts the base filename without path and extension
+// e.g., "incoming/photos/IMG_0001.jpg" -> "IMG_0001"
+func extractBaseName(key string) string {
+	// Get filename from path
+	filename := filepath.Base(key)
+	// Remove extension
+	ext := filepath.Ext(filename)
+	return strings.TrimSuffix(filename, ext)
+}
+
+// findRecordByOriginalFilename looks up an existing image record by its original base filename
+// Used to link RAW files to their corresponding JPG records
+// Uses the OriginalFilenameIndex GSI for efficient lookup
+func findRecordByOriginalFilename(baseName string) (*ImageMetadata, error) {
+	result, err := ddbClient.Query(&dynamodb.QueryInput{
+		TableName:              aws.String(tableName),
+		IndexName:              aws.String("OriginalFilenameIndex"),
+		KeyConditionExpression: aws.String("OriginalFilename = :baseName"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":baseName": {S: aws.String(baseName)},
+		},
+		Limit: aws.Int64(1),
+	})
+	if err != nil {
+		// Fall back to scan if GSI doesn't exist yet (during transition)
+		fmt.Printf("GSI query failed, falling back to scan: %v\n", err)
+		return findRecordByOriginalFilenameScan(baseName)
+	}
+	if len(result.Items) == 0 {
+		return nil, nil // Not found
+	}
+	var meta ImageMetadata
+	if err := dynamodbattribute.UnmarshalMap(result.Items[0], &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// findRecordByOriginalFilenameScan is a fallback for when the GSI doesn't exist
+func findRecordByOriginalFilenameScan(baseName string) (*ImageMetadata, error) {
+	result, err := ddbClient.Scan(&dynamodb.ScanInput{
+		TableName:        aws.String(tableName),
+		FilterExpression: aws.String("OriginalFilename = :baseName"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":baseName": {S: aws.String(baseName)},
+		},
+		Limit: aws.Int64(1),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Items) == 0 {
+		return nil, nil // Not found
+	}
+	var meta ImageMetadata
+	if err := dynamodbattribute.UnmarshalMap(result.Items[0], &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// updateRecordWithRawFile updates an existing image record to link the RAW file
+func updateRecordWithRawFile(imageGUID, rawFileKey string) error {
+	now := time.Now().Format(time.RFC3339)
+	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ImageGUID": {S: aws.String(imageGUID)},
+		},
+		UpdateExpression: aws.String("SET RawFile = :rawFile, UpdatedDateTime = :updated"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":rawFile": {S: aws.String(rawFileKey)},
+			":updated": {S: aws.String(now)},
+		},
+	})
+	return err
 }
 
 func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
@@ -195,163 +336,280 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 			}
 			key = decodedKey
 
+			// Skip if this is already in the images/ folder (already processed)
+			if strings.HasPrefix(key, "images/") {
+				continue
+			}
+
 			// Skip if this is already a thumbnail
 			if strings.Contains(key, ".50.") || strings.Contains(key, ".400.") {
 				continue
 			}
 
-			// Idempotency check - skip if already processed
-			alreadyProcessed, existingGUID, err := checkIdempotency(bucket, key)
-			if err != nil {
-				fmt.Printf("Warning: idempotency check failed: %v\n", err)
-				// Continue processing on check failure
-			} else if alreadyProcessed {
-				fmt.Printf("Skipping already processed file: %s (GUID: %s)\n", key, existingGUID)
+			// Skip special folders
+			if strings.HasPrefix(key, "deleted/") || strings.HasPrefix(key, "rejected/") ||
+				strings.HasPrefix(key, "corrupted/") || strings.HasPrefix(key, "project-zips/") {
 				continue
 			}
 
 			fmt.Printf("Processing file: %s from bucket: %s\n", key, bucket)
 
-		// Download the original image
-		result, err := s3Client.GetObject(&s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to get object: %v", err)
-		}
-		defer result.Body.Close()
-
-		// Decode the image
-		img, format, err := image.Decode(result.Body)
-		if err != nil {
-			if isCorruptedImageError(err) {
-				fmt.Printf("Corrupted/unsupported image detected: %s - %v\n", key, err)
-				result.Body.Close()
-				if moveErr := moveToCorrupted(bucket, key); moveErr != nil {
-					fmt.Printf("Warning: failed to move corrupted file: %v\n", moveErr)
+			// Route based on file type
+			if isRawFile(key) {
+				if err := processRawFile(bucket, key); err != nil {
+					fmt.Printf("Error processing RAW file %s: %v\n", key, err)
+					return err
 				}
-				continue // Skip to next file
-			}
-			return fmt.Errorf("failed to decode image: %v", err)
-		}
-
-		// Get original dimensions
-		bounds := img.Bounds()
-		width := bounds.Dx()
-		height := bounds.Dy()
-
-		// Save file size before re-fetching for EXIF
-		fileSize := int64(0)
-		if result.ContentLength != nil {
-			fileSize = *result.ContentLength
-		}
-
-		// Extract EXIF data
-		result.Body.Close() // Close previous read
-		result, err = s3Client.GetObject(&s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(key),
-		})
-		var exifData map[string]string
-		if err != nil {
-			fmt.Printf("Warning: failed to re-fetch image for EXIF extraction: %v\n", err)
-			exifData = make(map[string]string)
-		} else {
-			// Read body into buffer for EXIF extraction
-			exifBuf := new(bytes.Buffer)
-			exifBuf.ReadFrom(result.Body)
-			exifData = extractEXIF(bytes.NewReader(exifBuf.Bytes()))
-			result.Body.Close()
-		}
-
-		// Generate thumbnails (150px for small icons, 800px for gallery/modal - higher quality)
-		thumbnail50, err := generateThumbnail(img, 150)
-		if err != nil {
-			return fmt.Errorf("failed to generate 150px thumbnail: %v", err)
-		}
-
-		thumbnail400, err := generateThumbnail(img, 800)
-		if err != nil {
-			return fmt.Errorf("failed to generate 800px thumbnail: %v", err)
-		}
-
-		// Generate thumbnail file names
-		ext := filepath.Ext(key)
-		baseName := strings.TrimSuffix(key, ext)
-		thumbnail50Key := baseName + ".50" + ext
-		thumbnail400Key := baseName + ".400" + ext
-
-		// Upload thumbnails to S3
-		if err := uploadThumbnail(bucket, thumbnail50Key, thumbnail50); err != nil {
-			return fmt.Errorf("failed to upload 50px thumbnail: %v", err)
-		}
-
-		if err := uploadThumbnail(bucket, thumbnail400Key, thumbnail400); err != nil {
-			return fmt.Errorf("failed to upload 400px thumbnail: %v", err)
-		}
-
-		// Find related files with same base name
-		relatedFiles, err := findRelatedFiles(bucket, baseName)
-		if err != nil {
-			fmt.Printf("Warning: failed to find related files: %v\n", err)
-		}
-
-		// Create metadata record
-		now := time.Now().Format(time.RFC3339)
-		metadata := ImageMetadata{
-			ImageGUID:        uuid.New().String(),
-			OriginalFile:     key,
-			Bucket:           bucket,
-			Thumbnail50:      thumbnail50Key,
-			Thumbnail400:     thumbnail400Key,
-			RelatedFiles:     relatedFiles,
-			EXIFData:         exifData,
-			Width:            width,
-			Height:           height,
-			FileSize:         fileSize,
-			Reviewed:         "false",
-			InsertedDateTime: now,
-			UpdatedDateTime:  now,
-		}
-
-		// Store in DynamoDB
-		if err := storeMetadata(metadata); err != nil {
-			return fmt.Errorf("failed to store metadata: %v", err)
-		}
-
-		fmt.Printf("Successfully processed %s - GUID: %s\n", key, metadata.ImageGUID)
-		fmt.Printf("Format: %s\n", format)
-
-			// Generate AI keywords and description if OpenAI API key is configured
-			if openaiAPIKey != "" {
-				// Check circuit breaker before calling OpenAI
-				if checkCircuitBreaker() {
-					fmt.Printf("Circuit breaker OPEN - skipping GPT-4o analysis for %s\n", metadata.ImageGUID)
-				} else {
-					fmt.Printf("Starting GPT-4o analysis for new image %s\n", metadata.ImageGUID)
-
-					// Use the thumbnail400 buffer for AI analysis
-					aiResult, err := analyzeImageWithGPT4o(thumbnail400)
-					if err != nil {
-						fmt.Printf("GPT-4o analysis failed for image %s: %v\n", metadata.ImageGUID, err)
-						recordOpenAIFailure()
-						// Don't fail the whole operation, just log the error
-					} else {
-						recordOpenAISuccess()
-						// Update the metadata with AI results
-						if err := updateMetadataWithAI(metadata.ImageGUID, aiResult.Keywords, aiResult.Description); err != nil {
-							fmt.Printf("Failed to update metadata with AI results for %s: %v\n", metadata.ImageGUID, err)
-						} else {
-							fmt.Printf("Successfully added AI keywords and description for %s\n", metadata.ImageGUID)
-						}
-					}
+			} else if isJpgFile(key) {
+				if err := processJpgFile(bucket, key); err != nil {
+					fmt.Printf("Error processing JPG file %s: %v\n", key, err)
+					return err
 				}
+			} else {
+				fmt.Printf("Skipping unsupported file type: %s\n", key)
 			}
 		} // end inner for loop (S3 records)
 	} // end outer for loop (SQS records)
 
 	return nil
+}
+
+// processJpgFile handles JPG file processing with UUID-based naming
+func processJpgFile(bucket, key string) error {
+	// Extract original filename (without path and extension)
+	originalFilename := extractBaseName(key)
+
+	// Idempotency check - skip if already processed
+	alreadyProcessed, existingGUID, err := checkIdempotency(bucket, key)
+	if err != nil {
+		fmt.Printf("Warning: idempotency check failed: %v\n", err)
+		// Continue processing on check failure
+	} else if alreadyProcessed {
+		fmt.Printf("Skipping already processed file: %s (GUID: %s)\n", key, existingGUID)
+		// Delete the original file since it's already processed
+		deleteOriginalFile(bucket, key)
+		return nil
+	}
+
+	// Generate UUID for this image
+	imageGUID := uuid.New().String()
+
+	// Download the original image
+	result, err := s3Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get object: %v", err)
+	}
+	defer result.Body.Close()
+
+	// Read the entire file into memory for multiple uses
+	originalData, err := io.ReadAll(result.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read file data: %v", err)
+	}
+	fileSize := int64(len(originalData))
+
+	// Decode the image
+	img, format, err := image.Decode(bytes.NewReader(originalData))
+	if err != nil {
+		if isCorruptedImageError(err) {
+			fmt.Printf("Corrupted/unsupported image detected: %s - %v\n", key, err)
+			if moveErr := moveToCorrupted(bucket, key); moveErr != nil {
+				fmt.Printf("Warning: failed to move corrupted file: %v\n", moveErr)
+			}
+			return nil // Don't fail, just skip
+		}
+		return fmt.Errorf("failed to decode image: %v", err)
+	}
+
+	// Get original dimensions
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// Extract EXIF data
+	exifData := extractEXIF(bytes.NewReader(originalData))
+
+	// Generate thumbnails (150px for small icons, 800px for gallery/modal - higher quality)
+	thumbnail50, err := generateThumbnail(img, 150)
+	if err != nil {
+		return fmt.Errorf("failed to generate 150px thumbnail: %v", err)
+	}
+
+	thumbnail400, err := generateThumbnail(img, 800)
+	if err != nil {
+		return fmt.Errorf("failed to generate 800px thumbnail: %v", err)
+	}
+
+	// Generate UUID-based file paths
+	newJpgKey := fmt.Sprintf("images/%s.jpg", imageGUID)
+	thumbnail50Key := fmt.Sprintf("images/%s.50.jpg", imageGUID)
+	thumbnail400Key := fmt.Sprintf("images/%s.400.jpg", imageGUID)
+
+	// Upload the original JPG to its new UUID-based location
+	_, err = s3Client.PutObject(&s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(newJpgKey),
+		Body:        bytes.NewReader(originalData),
+		ContentType: aws.String("image/jpeg"),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to copy JPG to new location: %v", err)
+	}
+
+	// Upload thumbnails to S3
+	if err := uploadThumbnail(bucket, thumbnail50Key, thumbnail50); err != nil {
+		return fmt.Errorf("failed to upload 50px thumbnail: %v", err)
+	}
+
+	if err := uploadThumbnail(bucket, thumbnail400Key, thumbnail400); err != nil {
+		return fmt.Errorf("failed to upload 400px thumbnail: %v", err)
+	}
+
+	// Create metadata record
+	now := time.Now().Format(time.RFC3339)
+	metadata := ImageMetadata{
+		ImageGUID:        imageGUID,
+		OriginalFile:     newJpgKey,
+		OriginalFilename: originalFilename,
+		Bucket:           bucket,
+		Thumbnail50:      thumbnail50Key,
+		Thumbnail400:     thumbnail400Key,
+		RelatedFiles:     []string{}, // We'll populate this differently now
+		EXIFData:         exifData,
+		Width:            width,
+		Height:           height,
+		FileSize:         fileSize,
+		Reviewed:         "false",
+		InsertedDateTime: now,
+		UpdatedDateTime:  now,
+	}
+
+	// Store in DynamoDB
+	if err := storeMetadata(metadata); err != nil {
+		return fmt.Errorf("failed to store metadata: %v", err)
+	}
+
+	// Delete the original file from incoming location
+	deleteOriginalFile(bucket, key)
+
+	fmt.Printf("Successfully processed %s -> %s (GUID: %s, OriginalFilename: %s)\n",
+		key, newJpgKey, imageGUID, originalFilename)
+	fmt.Printf("Format: %s\n", format)
+
+	// Generate AI keywords and description if OpenAI API key is configured
+	if openaiAPIKey != "" {
+		// Check circuit breaker before calling OpenAI
+		if checkCircuitBreaker() {
+			fmt.Printf("Circuit breaker OPEN - skipping GPT-4o analysis for %s\n", imageGUID)
+		} else {
+			fmt.Printf("Starting GPT-4o analysis for new image %s\n", imageGUID)
+
+			// Use the thumbnail400 buffer for AI analysis
+			aiResult, err := analyzeImageWithGPT4o(thumbnail400)
+			if err != nil {
+				fmt.Printf("GPT-4o analysis failed for image %s: %v\n", imageGUID, err)
+				recordOpenAIFailure()
+				// Don't fail the whole operation, just log the error
+			} else {
+				recordOpenAISuccess()
+				// Update the metadata with AI results
+				if err := updateMetadataWithAI(imageGUID, aiResult.Keywords, aiResult.Description); err != nil {
+					fmt.Printf("Failed to update metadata with AI results for %s: %v\n", imageGUID, err)
+				} else {
+					fmt.Printf("Successfully added AI keywords and description for %s\n", imageGUID)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// processRawFile handles RAW file processing - links to existing JPG record
+func processRawFile(bucket, key string) error {
+	// Extract original filename (without path and extension)
+	originalFilename := extractBaseName(key)
+	rawExt := strings.ToLower(filepath.Ext(key))
+
+	fmt.Printf("Processing RAW file: %s (base name: %s)\n", key, originalFilename)
+
+	// Find the matching JPG record by original filename
+	existingRecord, err := findRecordByOriginalFilename(originalFilename)
+	if err != nil {
+		return fmt.Errorf("failed to look up matching JPG record: %v", err)
+	}
+
+	if existingRecord == nil {
+		// JPG hasn't been processed yet - return error to trigger SQS retry
+		fmt.Printf("No matching JPG found for RAW file %s - will retry via SQS\n", key)
+		return fmt.Errorf("JPG not yet processed for RAW file %s, will retry", originalFilename)
+	}
+
+	// Check if RAW is already linked
+	if existingRecord.RawFile != "" {
+		fmt.Printf("RAW file already linked for %s: %s\n", originalFilename, existingRecord.RawFile)
+		// Delete the original incoming RAW file
+		deleteOriginalFile(bucket, key)
+		return nil
+	}
+
+	// Download the RAW file
+	result, err := s3Client.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get RAW file: %v", err)
+	}
+	defer result.Body.Close()
+
+	// Read the RAW file data
+	rawData, err := io.ReadAll(result.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read RAW file data: %v", err)
+	}
+
+	// Generate the new RAW file key using the same UUID as the JPG
+	newRawKey := fmt.Sprintf("images/%s%s", existingRecord.ImageGUID, rawExt)
+
+	// Upload RAW to its new UUID-based location
+	_, err = s3Client.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(newRawKey),
+		Body:   bytes.NewReader(rawData),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to copy RAW to new location: %v", err)
+	}
+
+	// Update the DynamoDB record with the RAW file path
+	if err := updateRecordWithRawFile(existingRecord.ImageGUID, newRawKey); err != nil {
+		return fmt.Errorf("failed to update record with RAW file: %v", err)
+	}
+
+	// Delete the original RAW file from incoming location
+	deleteOriginalFile(bucket, key)
+
+	fmt.Printf("Successfully linked RAW file %s -> %s (GUID: %s)\n",
+		key, newRawKey, existingRecord.ImageGUID)
+
+	return nil
+}
+
+// deleteOriginalFile deletes a file from S3 (used after copying to new location)
+func deleteOriginalFile(bucket, key string) {
+	_, err := s3Client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		fmt.Printf("Warning: failed to delete original file %s: %v\n", key, err)
+	} else {
+		fmt.Printf("Deleted original file: %s\n", key)
+	}
 }
 
 // urlDecode decodes a URL-encoded string (S3 event keys are URL-encoded)

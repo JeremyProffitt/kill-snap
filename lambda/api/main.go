@@ -85,7 +85,9 @@ type LoginResponse struct {
 
 type ImageResponse struct {
 	ImageGUID        string            `json:"imageGUID"`
-	OriginalFile     string            `json:"originalFile"`
+	OriginalFile     string            `json:"originalFile"`     // S3 key (UUID-based: images/{uuid}.jpg)
+	OriginalFilename string            `json:"originalFilename,omitempty"` // Original base filename without extension
+	RawFile          string            `json:"rawFile,omitempty"` // S3 key of linked RAW file
 	Thumbnail50      string            `json:"thumbnail50"`
 	Thumbnail400     string            `json:"thumbnail400"`
 	Bucket           string            `json:"bucket"`

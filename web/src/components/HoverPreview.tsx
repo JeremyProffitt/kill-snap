@@ -21,6 +21,14 @@ const getFilename = (path: string): string => {
   return parts[parts.length - 1];
 };
 
+// Get display filename - prioritizes originalFilename, falls back to extracting from originalFile
+const getDisplayFilename = (image: Image): string => {
+  if (image.originalFilename) {
+    return image.originalFilename + '.jpg';
+  }
+  return getFilename(image.originalFile);
+};
+
 export const HoverPreview: React.FC<HoverPreviewProps> = ({
   image,
   position,
@@ -72,7 +80,7 @@ export const HoverPreview: React.FC<HoverPreviewProps> = ({
       <div className="hover-preview-image-container">
         <img
           src={api.getImageUrl(image.bucket, image.thumbnail400)}
-          alt={getFilename(image.originalFile)}
+          alt={getDisplayFilename(image)}
           onLoad={() => setImageLoaded(true)}
         />
         {!imageLoaded && (
@@ -82,7 +90,7 @@ export const HoverPreview: React.FC<HoverPreviewProps> = ({
         )}
       </div>
       <div className="hover-preview-info">
-        <div className="hover-preview-filename">{getFilename(image.originalFile)}</div>
+        <div className="hover-preview-filename">{getDisplayFilename(image)}</div>
         <div className="hover-preview-meta">
           <span>{image.width} x {image.height}</span>
           <span>{formatFileSize(image.fileSize)}</span>

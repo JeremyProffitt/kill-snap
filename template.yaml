@@ -222,6 +222,8 @@ Resources:
           AttributeType: S
         - AttributeName: ProjectID
           AttributeType: S
+        - AttributeName: OriginalFilename
+          AttributeType: S
       KeySchema:
         - AttributeName: ImageGUID
           KeyType: HASH
@@ -248,6 +250,12 @@ Resources:
               KeyType: HASH
             - AttributeName: ImageGUID
               KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: OriginalFilenameIndex
+          KeySchema:
+            - AttributeName: OriginalFilename
+              KeyType: HASH
           Projection:
             ProjectionType: ALL
 

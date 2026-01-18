@@ -1,6 +1,8 @@
 export interface Image {
   imageGUID: string;
-  originalFile: string;
+  originalFile: string;           // S3 key (UUID-based: images/{uuid}.jpg)
+  originalFilename?: string;      // Original base filename without extension (e.g., "IMG_0001")
+  rawFile?: string;               // S3 key of linked RAW file (e.g., images/{uuid}.CR2)
   thumbnail50: string;
   thumbnail400: string;
   bucket: string;

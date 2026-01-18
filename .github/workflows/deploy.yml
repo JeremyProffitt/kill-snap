@@ -339,28 +339,111 @@ jobs:
           echo "SQS Queue ARN: ${SQS_QUEUE_ARN}"
           echo "Configuring S3 notifications for bucket: ${IMAGE_BUCKET}"
 
-          # Configure S3 bucket notification to send to SQS for both .jpg and .JPG extensions
+          # Configure S3 bucket notification to send to SQS for JPG and RAW file extensions
           # SQS provides: retry with backoff, DLQ for failures, and better reliability
+          # RAW files: CR2/CR3 (Canon), NEF (Nikon), ARW (Sony), ORF (Olympus), RW2 (Panasonic), RAF (Fuji), DNG (Adobe)
           cat > /tmp/notification.json <<EOF
           {
             "QueueConfigurations": [
               {
                 "QueueArn": "${SQS_QUEUE_ARN}",
                 "Events": ["s3:ObjectCreated:*"],
-                "Filter": {
-                  "Key": {
-                    "FilterRules": [{"Name": "suffix", "Value": ".jpg"}]
-                  }
-                }
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".jpg"}] } }
               },
               {
                 "QueueArn": "${SQS_QUEUE_ARN}",
                 "Events": ["s3:ObjectCreated:*"],
-                "Filter": {
-                  "Key": {
-                    "FilterRules": [{"Name": "suffix", "Value": ".JPG"}]
-                  }
-                }
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".JPG"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".jpeg"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".JPEG"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".cr2"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".CR2"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".cr3"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".CR3"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".nef"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".NEF"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".arw"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".ARW"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".orf"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".ORF"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".rw2"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".RW2"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".raf"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".RAF"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".dng"}] } }
+              },
+              {
+                "QueueArn": "${SQS_QUEUE_ARN}",
+                "Events": ["s3:ObjectCreated:*"],
+                "Filter": { "Key": { "FilterRules": [{"Name": "suffix", "Value": ".DNG"}] } }
               }
             ]
           }
