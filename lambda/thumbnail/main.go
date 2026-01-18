@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -145,6 +146,91 @@ func isRawFile(key string) bool {
 func isJpgFile(key string) bool {
 	ext := strings.ToLower(filepath.Ext(key))
 	return ext == ".jpg" || ext == ".jpeg"
+}
+
+// extractJPEGFromRAF extracts the embedded JPEG preview from a Fujifilm RAF file
+// RAF files contain an embedded full-resolution JPEG that can be used for processing
+func extractJPEGFromRAF(rafData []byte) ([]byte, error) {
+	// RAF file structure (Fujifilm):
+	// Offset 0: "FUJIFILMCCD-RAW " (16 bytes)
+	// Offset 84: JPEG image offset (4 bytes, big-endian)
+	// Offset 88: JPEG image length (4 bytes, big-endian)
+
+	if len(rafData) < 92 {
+		return nil, fmt.Errorf("file too small to be valid RAF")
+	}
+
+	// Check header for Fujifilm RAF
+	if len(rafData) > 15 && string(rafData[:15]) == "FUJIFILMCCD-RAW" {
+		// Read JPEG offset and length from header
+		jpegOffset := binary.BigEndian.Uint32(rafData[84:88])
+		jpegLength := binary.BigEndian.Uint32(rafData[88:92])
+
+		// Validate offset and length
+		if jpegOffset > 0 && jpegLength > 0 && int(jpegOffset+jpegLength) <= len(rafData) {
+			jpegData := rafData[jpegOffset : jpegOffset+jpegLength]
+			// Verify it's actually a JPEG
+			if len(jpegData) >= 3 && jpegData[0] == 0xFF && jpegData[1] == 0xD8 && jpegData[2] == 0xFF {
+				return jpegData, nil
+			}
+		}
+	}
+
+	// Fallback: scan for largest embedded JPEG (works for any RAW format)
+	return extractJPEGByScan(rafData)
+}
+
+// extractJPEGByScan finds the largest embedded JPEG by scanning for JPEG markers
+func extractJPEGByScan(rawData []byte) ([]byte, error) {
+	var largestJPEG []byte
+	searchStart := 0
+
+	for searchStart < len(rawData)-3 {
+		// Find JPEG start marker (FF D8 FF)
+		jpegStart := -1
+		for i := searchStart; i < len(rawData)-3; i++ {
+			if rawData[i] == 0xFF && rawData[i+1] == 0xD8 && rawData[i+2] == 0xFF {
+				jpegStart = i
+				break
+			}
+		}
+
+		if jpegStart == -1 {
+			break
+		}
+
+		// Find JPEG end marker (FF D9)
+		jpegEnd := -1
+		for i := jpegStart + 3; i < len(rawData)-1; i++ {
+			if rawData[i] == 0xFF && rawData[i+1] == 0xD9 {
+				jpegEnd = i + 2
+				break
+			}
+		}
+
+		if jpegEnd == -1 {
+			searchStart = jpegStart + 1
+			continue
+		}
+
+		jpegData := rawData[jpegStart:jpegEnd]
+		if len(jpegData) > len(largestJPEG) {
+			largestJPEG = jpegData
+		}
+
+		searchStart = jpegEnd
+	}
+
+	if len(largestJPEG) == 0 {
+		return nil, fmt.Errorf("no embedded JPEG found in RAW file")
+	}
+
+	// Minimum size check - embedded preview should be at least 500KB
+	if len(largestJPEG) < 500*1024 {
+		return nil, fmt.Errorf("embedded JPEG too small (%d bytes), likely just a thumbnail", len(largestJPEG))
+	}
+
+	return largestJPEG, nil
 }
 
 func init() {
@@ -564,8 +650,9 @@ func processJpgFile(bucket, key string) error {
 	return nil
 }
 
-// processRawFile handles RAW file processing - links to existing JPG record
-// receiptHandle is used to set a longer visibility timeout if JPG isn't ready yet
+// processRawFile handles RAW file processing
+// If a matching JPG record exists, links the RAW to it
+// If no JPG exists, extracts the embedded JPEG preview and creates a new record
 func processRawFile(bucket, key, receiptHandle string) error {
 	// Extract original filename (without path and extension)
 	originalFilename := extractBaseName(key)
@@ -579,36 +666,7 @@ func processRawFile(bucket, key, receiptHandle string) error {
 		return fmt.Errorf("failed to look up matching JPG record: %v", err)
 	}
 
-	if existingRecord == nil {
-		// JPG hasn't been processed yet - set 20 minute visibility timeout and return error
-		fmt.Printf("No matching JPG found for RAW file %s - setting 20 minute delay before retry\n", key)
-
-		// Change message visibility to delay retry by 20 minutes
-		if sqsQueueURL != "" && receiptHandle != "" {
-			_, visErr := sqsClient.ChangeMessageVisibility(&sqs.ChangeMessageVisibilityInput{
-				QueueUrl:          aws.String(sqsQueueURL),
-				ReceiptHandle:     aws.String(receiptHandle),
-				VisibilityTimeout: aws.Int64(rawRetryDelaySeconds),
-			})
-			if visErr != nil {
-				fmt.Printf("Warning: failed to change message visibility: %v\n", visErr)
-			} else {
-				fmt.Printf("Set message visibility timeout to %d seconds for RAW retry\n", rawRetryDelaySeconds)
-			}
-		}
-
-		return &SoftRetryError{Message: fmt.Sprintf("JPG not yet processed for RAW file %s, will retry in 20 minutes", originalFilename)}
-	}
-
-	// Check if RAW is already linked
-	if existingRecord.RawFile != "" {
-		fmt.Printf("RAW file already linked for %s: %s\n", originalFilename, existingRecord.RawFile)
-		// Delete the original incoming RAW file
-		deleteOriginalFile(bucket, key)
-		return nil
-	}
-
-	// Download the RAW file
+	// Download the RAW file first (needed for both paths)
 	result, err := s3Client.GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -618,16 +676,45 @@ func processRawFile(bucket, key, receiptHandle string) error {
 	}
 	defer result.Body.Close()
 
-	// Read the RAW file data
 	rawData, err := io.ReadAll(result.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read RAW file data: %v", err)
 	}
 
-	// Generate the new RAW file key using the same UUID as the JPG
+	// Check minimum file size - RAW files should be at least 10MB
+	if len(rawData) < 10*1024*1024 {
+		fmt.Printf("RAW file %s is too small (%d bytes), likely corrupted - moving to corrupted/\n", key, len(rawData))
+		if moveErr := moveToCorrupted(bucket, key); moveErr != nil {
+			fmt.Printf("Warning: failed to move corrupted file: %v\n", moveErr)
+		}
+		return nil
+	}
+
+	if existingRecord == nil {
+		// No matching JPG - extract embedded JPEG from RAW and create new record
+		fmt.Printf("No matching JPG found for RAW file %s - extracting embedded JPEG preview\n", key)
+
+		jpegData, err := extractJPEGFromRAF(rawData)
+		if err != nil {
+			return fmt.Errorf("failed to extract JPEG from RAW file: %v", err)
+		}
+
+		fmt.Printf("Extracted %d byte JPEG from RAW file\n", len(jpegData))
+
+		// Process the extracted JPEG like a normal JPG file
+		return processRawWithExtractedJPEG(bucket, key, originalFilename, rawExt, rawData, jpegData)
+	}
+
+	// Check if RAW is already linked
+	if existingRecord.RawFile != "" {
+		fmt.Printf("RAW file already linked for %s: %s\n", originalFilename, existingRecord.RawFile)
+		deleteOriginalFile(bucket, key)
+		return nil
+	}
+
+	// Link the RAW file to the existing JPG record
 	newRawKey := fmt.Sprintf("images/%s%s", existingRecord.ImageGUID, rawExt)
 
-	// Upload RAW to its new UUID-based location
 	_, err = s3Client.PutObject(&s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(newRawKey),
@@ -637,16 +724,123 @@ func processRawFile(bucket, key, receiptHandle string) error {
 		return fmt.Errorf("failed to copy RAW to new location: %v", err)
 	}
 
-	// Update the DynamoDB record with the RAW file path
 	if err := updateRecordWithRawFile(existingRecord.ImageGUID, newRawKey); err != nil {
 		return fmt.Errorf("failed to update record with RAW file: %v", err)
 	}
 
-	// Delete the original RAW file from incoming location
 	deleteOriginalFile(bucket, key)
 
 	fmt.Printf("Successfully linked RAW file %s -> %s (GUID: %s)\n",
 		key, newRawKey, existingRecord.ImageGUID)
+
+	return nil
+}
+
+// processRawWithExtractedJPEG creates a new image record from a RAW file's embedded JPEG
+func processRawWithExtractedJPEG(bucket, rawKey, originalFilename, rawExt string, rawData, jpegData []byte) error {
+	// Generate UUID for this image
+	imageGUID := uuid.New().String()
+
+	// Decode the extracted JPEG
+	img, _, err := image.Decode(bytes.NewReader(jpegData))
+	if err != nil {
+		return fmt.Errorf("failed to decode extracted JPEG: %v", err)
+	}
+
+	// Get dimensions
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// Extract EXIF data from the JPEG
+	exifData := extractEXIF(bytes.NewReader(jpegData))
+
+	// Generate thumbnails
+	thumbnail50, err := generateThumbnail(img, 150)
+	if err != nil {
+		return fmt.Errorf("failed to generate 150px thumbnail: %v", err)
+	}
+
+	thumbnail400, err := generateThumbnail(img, 800)
+	if err != nil {
+		return fmt.Errorf("failed to generate 800px thumbnail: %v", err)
+	}
+
+	// Generate UUID-based file paths
+	newJpgKey := fmt.Sprintf("images/%s.jpg", imageGUID)
+	newRawKey := fmt.Sprintf("images/%s%s", imageGUID, rawExt)
+	thumbnail50Key := fmt.Sprintf("images/%s.50.jpg", imageGUID)
+	thumbnail400Key := fmt.Sprintf("images/%s.400.jpg", imageGUID)
+
+	// Upload the extracted JPEG
+	_, err = s3Client.PutObject(&s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(newJpgKey),
+		Body:        bytes.NewReader(jpegData),
+		ContentType: aws.String("image/jpeg"),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload extracted JPEG: %v", err)
+	}
+
+	// Upload the RAW file to its new location
+	_, err = s3Client.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(newRawKey),
+		Body:   bytes.NewReader(rawData),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload RAW to new location: %v", err)
+	}
+
+	// Upload thumbnails
+	if err := uploadThumbnail(bucket, thumbnail50Key, thumbnail50); err != nil {
+		return fmt.Errorf("failed to upload 50px thumbnail: %v", err)
+	}
+
+	if err := uploadThumbnail(bucket, thumbnail400Key, thumbnail400); err != nil {
+		return fmt.Errorf("failed to upload 400px thumbnail: %v", err)
+	}
+
+	// Create metadata record
+	now := time.Now().Format(time.RFC3339)
+	metadata := ImageMetadata{
+		ImageGUID:        imageGUID,
+		OriginalFile:     newJpgKey,
+		OriginalFilename: originalFilename,
+		RawFile:          newRawKey,
+		Bucket:           bucket,
+		Thumbnail50:      thumbnail50Key,
+		Thumbnail400:     thumbnail400Key,
+		RelatedFiles:     []string{},
+		EXIFData:         exifData,
+		Width:            width,
+		Height:           height,
+		FileSize:         int64(len(rawData)), // Use RAW file size as the "original" size
+		Reviewed:         "",
+		InsertedDateTime: now,
+		UpdatedDateTime:  now,
+	}
+
+	// Store metadata in DynamoDB
+	item, err := dynamodbattribute.MarshalMap(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %v", err)
+	}
+
+	_, err = ddbClient.PutItem(&dynamodb.PutItemInput{
+		TableName: aws.String(tableName),
+		Item:      item,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to put metadata in DynamoDB: %v", err)
+	}
+
+	// Delete the original RAW file from incoming
+	deleteOriginalFile(bucket, rawKey)
+
+	fmt.Printf("Successfully processed RAW file %s -> GUID: %s (extracted JPEG: %s, RAW: %s)\n",
+		rawKey, imageGUID, newJpgKey, newRawKey)
 
 	return nil
 }
