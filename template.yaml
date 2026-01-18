@@ -44,6 +44,167 @@ Resources:
   # ImageBucket: $S3_BUCKET (from GitHub variables)
   # WebsiteBucket: $S3_BUCKET-web
 
+  # ============================================
+  # SNS Topic for CloudWatch Alarms
+  # ============================================
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: kill-snap-alarms
+      DisplayName: Kill-Snap System Alarms
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlarmNotificationTopic
+      Protocol: email
+      Endpoint: proffitt.jeremy@gmail.com
+
+  # ============================================
+  # SQS Queues for Resilient Image Processing
+  # ============================================
+
+  # Dead Letter Queue for failed image processing
+  ImageProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: kill-snap-image-processing-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  # Main queue for image processing (S3 -> SQS -> Lambda)
+  ImageProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: kill-snap-image-processing
+      VisibilityTimeout: 360  # 6 minutes (longer than Lambda timeout)
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ImageProcessingDLQ.Arn
+        maxReceiveCount: 10  # Retry 10 times before DLQ
+
+  # Policy to allow S3 to send messages to SQS
+  ImageProcessingQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref ImageProcessingQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt ImageProcessingQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+
+  # ============================================
+  # CloudWatch Alarms
+  # ============================================
+
+  # Alarm: Thumbnail Lambda Errors
+  ThumbnailLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-thumbnail-lambda-errors
+      AlarmDescription: Thumbnail Lambda function is experiencing errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300  # 5 minutes
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ImageThumbnailGenerator
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
+  # Alarm: Thumbnail Lambda Throttling
+  ThumbnailLambdaThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-thumbnail-lambda-throttles
+      AlarmDescription: Thumbnail Lambda function is being throttled
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ImageThumbnailGenerator
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # Alarm: API Lambda Errors
+  ApiLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-api-lambda-errors
+      AlarmDescription: API Lambda function is experiencing errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: ImageReviewApi
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
+  # Alarm: DLQ has messages (processing failures)
+  DLQMessagesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-dlq-messages
+      AlarmDescription: Dead Letter Queue has messages - image processing failures
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ImageProcessingDLQ.QueueName
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # Alarm: High API Gateway 5xx errors
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-api-5xx-errors
+      AlarmDescription: API Gateway is returning 5xx errors
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref ImageReviewApi
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
   # DynamoDB table for image metadata
   ImageMetadataTable:
     Type: AWS::DynamoDB::Table
@@ -177,6 +338,18 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:Scan
               Resource: !GetAtt ImageMetadataTable.Arn
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource: !GetAtt ImageProcessingQueue.Arn
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ImageProcessingQueue.Arn
+            BatchSize: 1  # Process one image at a time for reliability
 
   # Lambda function for project zip generation
   ZipGeneratorFunction:
@@ -686,3 +859,19 @@ Outputs:
   ImageCDNUrl:
     Description: CloudFront URL for serving images
     Value: !Sub https://${ImageCDN.DomainName}
+
+  ImageProcessingQueueArn:
+    Description: SQS Queue ARN for image processing
+    Value: !GetAtt ImageProcessingQueue.Arn
+
+  ImageProcessingQueueUrl:
+    Description: SQS Queue URL for image processing
+    Value: !Ref ImageProcessingQueue
+
+  ImageProcessingDLQArn:
+    Description: Dead Letter Queue ARN for failed image processing
+    Value: !GetAtt ImageProcessingDLQ.Arn
+
+  AlarmTopicArn:
+    Description: SNS Topic ARN for CloudWatch alarms
+    Value: !Ref AlarmNotificationTopic

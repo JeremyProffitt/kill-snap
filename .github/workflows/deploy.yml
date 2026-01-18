@@ -122,6 +122,16 @@ jobs:
                 "Expiration": {
                   "Days": 30
                 }
+              },
+              {
+                "ID": "DeleteCorruptedAfter90Days",
+                "Filter": {
+                  "Prefix": "corrupted/"
+                },
+                "Status": "Enabled",
+                "Expiration": {
+                  "Days": 90
+                }
               }
             ]
           }
@@ -135,6 +145,7 @@ jobs:
           echo "  - deleted/ folder: 90-day expiration"
           echo "  - rejected/ folder: 365-day expiration"
           echo "  - project-zips/ folder: 30-day expiration"
+          echo "  - corrupted/ folder: 90-day expiration"
 
       - name: Build SAM application
         run: |
@@ -310,7 +321,7 @@ jobs:
             --output json
           exit 1
 
-      - name: Configure S3 event notification
+      - name: Configure S3 event notification to SQS
         continue-on-error: true
         run: |
           # Get bucket name from CloudFormation outputs
@@ -319,30 +330,22 @@ jobs:
             --query 'Stacks[0].Outputs[?OutputKey==`ImageBucketName`].OutputValue' \
             --output text)
 
-          # Get Lambda ARN from stack outputs
-          LAMBDA_ARN=$(aws cloudformation describe-stacks \
+          # Get SQS Queue ARN from stack outputs
+          SQS_QUEUE_ARN=$(aws cloudformation describe-stacks \
             --stack-name kill-snap-svc \
-            --query 'Stacks[0].Outputs[?OutputKey==`ThumbnailLambdaArn`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`ImageProcessingQueueArn`].OutputValue' \
             --output text)
 
-          echo "Lambda ARN: ${LAMBDA_ARN}"
-          echo "Configuring notifications for bucket: ${IMAGE_BUCKET}"
+          echo "SQS Queue ARN: ${SQS_QUEUE_ARN}"
+          echo "Configuring S3 notifications for bucket: ${IMAGE_BUCKET}"
 
-          # Add Lambda permission for S3 to invoke
-          aws lambda add-permission \
-            --function-name ImageThumbnailGenerator \
-            --statement-id s3-trigger-permission \
-            --action lambda:InvokeFunction \
-            --principal s3.amazonaws.com \
-            --source-arn arn:aws:s3:::${IMAGE_BUCKET} \
-            || echo "Permission may already exist"
-
-          # Configure S3 bucket notification for both .jpg and .JPG extensions
+          # Configure S3 bucket notification to send to SQS for both .jpg and .JPG extensions
+          # SQS provides: retry with backoff, DLQ for failures, and better reliability
           cat > /tmp/notification.json <<EOF
           {
-            "LambdaFunctionConfigurations": [
+            "QueueConfigurations": [
               {
-                "LambdaFunctionArn": "${LAMBDA_ARN}",
+                "QueueArn": "${SQS_QUEUE_ARN}",
                 "Events": ["s3:ObjectCreated:*"],
                 "Filter": {
                   "Key": {
@@ -351,7 +354,7 @@ jobs:
                 }
               },
               {
-                "LambdaFunctionArn": "${LAMBDA_ARN}",
+                "QueueArn": "${SQS_QUEUE_ARN}",
                 "Events": ["s3:ObjectCreated:*"],
                 "Filter": {
                   "Key": {

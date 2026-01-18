@@ -89,11 +89,24 @@ type AIAnalysisResult struct {
 	Description string   `json:"description"`
 }
 
+// Circuit breaker state for OpenAI
+type CircuitBreaker struct {
+	consecutiveFailures int
+	lastFailureTime     time.Time
+	isOpen              bool
+}
+
 var (
-	s3Client     *s3.S3
-	ddbClient    *dynamodb.DynamoDB
-	tableName    string
-	openaiAPIKey string
+	s3Client       *s3.S3
+	ddbClient      *dynamodb.DynamoDB
+	tableName      string
+	openaiAPIKey   string
+	circuitBreaker CircuitBreaker
+)
+
+const (
+	circuitBreakerThreshold = 5                // Open circuit after 5 consecutive failures
+	circuitBreakerReset     = 5 * time.Minute  // Reset circuit after 5 minutes
 )
 
 func init() {
@@ -102,19 +115,102 @@ func init() {
 	ddbClient = dynamodb.New(sess)
 	tableName = os.Getenv("DYNAMODB_TABLE")
 	openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+	circuitBreaker = CircuitBreaker{}
 }
 
-func handler(ctx context.Context, s3Event events.S3Event) error {
-	for _, record := range s3Event.Records {
-		bucket := record.S3.Bucket.Name
-		key := record.S3.Object.Key
+// checkCircuitBreaker returns true if OpenAI calls should be skipped
+func checkCircuitBreaker() bool {
+	if !circuitBreaker.isOpen {
+		return false
+	}
+	// Check if enough time has passed to reset
+	if time.Since(circuitBreaker.lastFailureTime) > circuitBreakerReset {
+		fmt.Println("Circuit breaker reset - allowing OpenAI calls again")
+		circuitBreaker.isOpen = false
+		circuitBreaker.consecutiveFailures = 0
+		return false
+	}
+	return true
+}
 
-		// Skip if this is already a thumbnail
-		if strings.Contains(key, ".50.") || strings.Contains(key, ".400.") {
-			continue
+// recordOpenAISuccess resets the circuit breaker on success
+func recordOpenAISuccess() {
+	circuitBreaker.consecutiveFailures = 0
+	circuitBreaker.isOpen = false
+}
+
+// recordOpenAIFailure tracks failures and opens circuit if threshold reached
+func recordOpenAIFailure() {
+	circuitBreaker.consecutiveFailures++
+	circuitBreaker.lastFailureTime = time.Now()
+	if circuitBreaker.consecutiveFailures >= circuitBreakerThreshold {
+		circuitBreaker.isOpen = true
+		fmt.Printf("Circuit breaker OPEN - skipping OpenAI calls after %d consecutive failures\n", circuitBreaker.consecutiveFailures)
+	}
+}
+
+// checkIdempotency checks if an image with this S3 key has already been processed
+func checkIdempotency(bucket, key string) (bool, string, error) {
+	// Query by OriginalFile to see if we already processed this
+	result, err := ddbClient.Scan(&dynamodb.ScanInput{
+		TableName:        aws.String(tableName),
+		FilterExpression: aws.String("OriginalFile = :key"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":key": {S: aws.String(key)},
+		},
+		Limit: aws.Int64(1),
+	})
+	if err != nil {
+		return false, "", err
+	}
+	if len(result.Items) > 0 {
+		// Already processed
+		var meta ImageMetadata
+		if err := dynamodbattribute.UnmarshalMap(result.Items[0], &meta); err == nil {
+			return true, meta.ImageGUID, nil
+		}
+	}
+	return false, "", nil
+}
+
+func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	for _, sqsRecord := range sqsEvent.Records {
+		// Parse S3 event from SQS message body
+		var s3Event events.S3Event
+		if err := json.Unmarshal([]byte(sqsRecord.Body), &s3Event); err != nil {
+			fmt.Printf("Error parsing S3 event from SQS message: %v\n", err)
+			// Return error to trigger retry via SQS visibility timeout
+			return fmt.Errorf("failed to parse S3 event: %v", err)
 		}
 
-		fmt.Printf("Processing file: %s from bucket: %s\n", key, bucket)
+		for _, record := range s3Event.Records {
+			bucket := record.S3.Bucket.Name
+			key := record.S3.Object.Key
+
+			// URL decode the key (S3 events have URL-encoded keys)
+			decodedKey, err := urlDecode(key)
+			if err != nil {
+				fmt.Printf("Warning: could not decode key %s: %v\n", key, err)
+				decodedKey = key
+			}
+			key = decodedKey
+
+			// Skip if this is already a thumbnail
+			if strings.Contains(key, ".50.") || strings.Contains(key, ".400.") {
+				continue
+			}
+
+			// Idempotency check - skip if already processed
+			alreadyProcessed, existingGUID, err := checkIdempotency(bucket, key)
+			if err != nil {
+				fmt.Printf("Warning: idempotency check failed: %v\n", err)
+				// Continue processing on check failure
+			} else if alreadyProcessed {
+				fmt.Printf("Skipping already processed file: %s (GUID: %s)\n", key, existingGUID)
+				continue
+			}
+
+			fmt.Printf("Processing file: %s from bucket: %s\n", key, bucket)
 
 		// Download the original image
 		result, err := s3Client.GetObject(&s3.GetObjectInput{
@@ -227,27 +323,53 @@ func handler(ctx context.Context, s3Event events.S3Event) error {
 		fmt.Printf("Successfully processed %s - GUID: %s\n", key, metadata.ImageGUID)
 		fmt.Printf("Format: %s\n", format)
 
-		// Generate AI keywords and description if OpenAI API key is configured
-		if openaiAPIKey != "" {
-			fmt.Printf("Starting GPT-4o analysis for new image %s\n", metadata.ImageGUID)
-
-			// Use the thumbnail400 buffer for AI analysis
-			aiResult, err := analyzeImageWithGPT4o(thumbnail400)
-			if err != nil {
-				fmt.Printf("GPT-4o analysis failed for image %s: %v\n", metadata.ImageGUID, err)
-				// Don't fail the whole operation, just log the error
-			} else {
-				// Update the metadata with AI results
-				if err := updateMetadataWithAI(metadata.ImageGUID, aiResult.Keywords, aiResult.Description); err != nil {
-					fmt.Printf("Failed to update metadata with AI results for %s: %v\n", metadata.ImageGUID, err)
+			// Generate AI keywords and description if OpenAI API key is configured
+			if openaiAPIKey != "" {
+				// Check circuit breaker before calling OpenAI
+				if checkCircuitBreaker() {
+					fmt.Printf("Circuit breaker OPEN - skipping GPT-4o analysis for %s\n", metadata.ImageGUID)
 				} else {
-					fmt.Printf("Successfully added AI keywords and description for %s\n", metadata.ImageGUID)
+					fmt.Printf("Starting GPT-4o analysis for new image %s\n", metadata.ImageGUID)
+
+					// Use the thumbnail400 buffer for AI analysis
+					aiResult, err := analyzeImageWithGPT4o(thumbnail400)
+					if err != nil {
+						fmt.Printf("GPT-4o analysis failed for image %s: %v\n", metadata.ImageGUID, err)
+						recordOpenAIFailure()
+						// Don't fail the whole operation, just log the error
+					} else {
+						recordOpenAISuccess()
+						// Update the metadata with AI results
+						if err := updateMetadataWithAI(metadata.ImageGUID, aiResult.Keywords, aiResult.Description); err != nil {
+							fmt.Printf("Failed to update metadata with AI results for %s: %v\n", metadata.ImageGUID, err)
+						} else {
+							fmt.Printf("Successfully added AI keywords and description for %s\n", metadata.ImageGUID)
+						}
+					}
 				}
 			}
-		}
-	}
+		} // end inner for loop (S3 records)
+	} // end outer for loop (SQS records)
 
 	return nil
+}
+
+// urlDecode decodes a URL-encoded string (S3 event keys are URL-encoded)
+func urlDecode(s string) (string, error) {
+	// Replace + with space, then decode percent-encoded characters
+	s = strings.ReplaceAll(s, "+", " ")
+	var result strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if hex, err := strconv.ParseInt(s[i+1:i+3], 16, 32); err == nil {
+				result.WriteByte(byte(hex))
+				i += 2
+				continue
+			}
+		}
+		result.WriteByte(s[i])
+	}
+	return result.String(), nil
 }
 
 func generateThumbnail(img image.Image, height int) (*bytes.Buffer, error) {
