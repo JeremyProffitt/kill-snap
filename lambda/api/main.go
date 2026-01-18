@@ -509,19 +509,71 @@ func moveImageFiles(bucket string, img ImageResponse, destPrefix string) (map[st
 }
 
 func copyS3Object(bucket, srcKey, dstKey string) error {
-	_, err := s3Client.CopyObject(&s3.CopyObjectInput{
-		Bucket:     aws.String(bucket),
-		CopySource: aws.String(url.PathEscape(bucket + "/" + srcKey)),
-		Key:        aws.String(dstKey),
+	return s3OperationWithRetry(func() error {
+		_, err := s3Client.CopyObject(&s3.CopyObjectInput{
+			Bucket:     aws.String(bucket),
+			CopySource: aws.String(url.PathEscape(bucket + "/" + srcKey)),
+			Key:        aws.String(dstKey),
+		})
+		return err
 	})
-	return err
 }
 
 func deleteS3Object(bucket, key string) {
-	s3Client.DeleteObject(&s3.DeleteObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
+	s3OperationWithRetry(func() error {
+		_, err := s3Client.DeleteObject(&s3.DeleteObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		})
+		return err
 	})
+}
+
+// s3OperationWithRetry executes an S3 operation with exponential backoff retry
+func s3OperationWithRetry(operation func() error) error {
+	maxRetries := 3
+	baseDelay := 100 * time.Millisecond
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		lastErr = operation()
+		if lastErr == nil {
+			return nil
+		}
+
+		// Check if error is retryable (throttling, service unavailable)
+		if !isRetryableS3Error(lastErr) {
+			return lastErr
+		}
+
+		// Exponential backoff: 100ms, 200ms, 400ms
+		delay := baseDelay * time.Duration(1<<attempt)
+		fmt.Printf("S3 operation failed (attempt %d/%d): %v, retrying in %v\n", attempt+1, maxRetries, lastErr, delay)
+		time.Sleep(delay)
+	}
+	return lastErr
+}
+
+// isRetryableS3Error checks if an S3 error is retryable
+func isRetryableS3Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	retryablePatterns := []string{
+		"throttl",
+		"slow down",
+		"service unavailable",
+		"internal error",
+		"connection reset",
+		"timeout",
+	}
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // isNoSuchKeyError checks if an error is an S3 NoSuchKey error
