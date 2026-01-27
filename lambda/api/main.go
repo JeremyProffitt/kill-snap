@@ -1365,63 +1365,95 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 	var result *dynamodb.QueryOutput
 	var err error
 
-	// Determine reviewed value based on state filter
+	// Determine query based on state filter using StatusIndex
 	switch stateFilter {
 	case "unreviewed":
-		// Query for unreviewed images using GSI
+		// Query for inbox images using StatusIndex
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
-			IndexName:              aws.String("ReviewedIndex"),
-			KeyConditionExpression: aws.String("Reviewed = :reviewed"),
+			IndexName:              aws.String("StatusIndex"),
+			KeyConditionExpression: aws.String("#status = :status"),
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
 			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":reviewed": {S: aws.String("false")},
+				":status": {S: aws.String("inbox")},
 			},
 		}
 		result, err = ddbClient.Query(input)
-	case "approved", "rejected":
-		// Query for reviewed images using GSI
+	case "approved":
+		// Query for approved images using StatusIndex
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
-			IndexName:              aws.String("ReviewedIndex"),
-			KeyConditionExpression: aws.String("Reviewed = :reviewed"),
+			IndexName:              aws.String("StatusIndex"),
+			KeyConditionExpression: aws.String("#status = :status"),
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
 			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":reviewed": {S: aws.String("true")},
+				":status": {S: aws.String("approved")},
+			},
+		}
+		// Add FilterExpression for group if specified
+		if groupFilter != "" && groupFilter != "all" {
+			groupNum := 0
+			fmt.Sscanf(groupFilter, "%d", &groupNum)
+			input.FilterExpression = aws.String("GroupNumber = :group")
+			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+		}
+		result, err = ddbClient.Query(input)
+	case "rejected":
+		// Query for rejected images using StatusIndex
+		input := &dynamodb.QueryInput{
+			TableName:              aws.String(imageTable),
+			IndexName:              aws.String("StatusIndex"),
+			KeyConditionExpression: aws.String("#status = :status"),
+			ExpressionAttributeNames: map[string]*string{
+				"#status": aws.String("Status"),
+			},
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":status": {S: aws.String("rejected")},
 			},
 		}
 		result, err = ddbClient.Query(input)
 	case "deleted":
-		// Scan for deleted images (Status = "deleted")
-		scanResult, scanErr := ddbClient.Scan(&dynamodb.ScanInput{
-			TableName:        aws.String(imageTable),
-			FilterExpression: aws.String("#status = :deleted"),
+		// Query for deleted images using StatusIndex
+		input := &dynamodb.QueryInput{
+			TableName:              aws.String(imageTable),
+			IndexName:              aws.String("StatusIndex"),
+			KeyConditionExpression: aws.String("#status = :status"),
 			ExpressionAttributeNames: map[string]*string{
 				"#status": aws.String("Status"),
 			},
 			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":deleted": {S: aws.String("deleted")},
+				":status": {S: aws.String("deleted")},
 			},
-		})
-		if scanErr != nil {
-			err = scanErr
-		} else {
-			result = &dynamodb.QueryOutput{Items: scanResult.Items}
 		}
+		result, err = ddbClient.Query(input)
 	case "all":
-		// Scan all images (excluding deleted)
-		scanResult, scanErr := ddbClient.Scan(&dynamodb.ScanInput{
-			TableName:        aws.String(imageTable),
-			FilterExpression: aws.String("attribute_not_exists(#status) OR #status <> :deleted"),
-			ExpressionAttributeNames: map[string]*string{
-				"#status": aws.String("Status"),
-			},
-			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":deleted": {S: aws.String("deleted")},
-			},
-		})
-		if scanErr != nil {
-			err = scanErr
-		} else {
-			result = &dynamodb.QueryOutput{Items: scanResult.Items}
+		// Query each status and merge results (excluding deleted)
+		statuses := []string{"inbox", "approved", "rejected", "project"}
+		var allItems []map[string]*dynamodb.AttributeValue
+		for _, status := range statuses {
+			queryResult, queryErr := ddbClient.Query(&dynamodb.QueryInput{
+				TableName:              aws.String(imageTable),
+				IndexName:              aws.String("StatusIndex"),
+				KeyConditionExpression: aws.String("#status = :status"),
+				ExpressionAttributeNames: map[string]*string{
+					"#status": aws.String("Status"),
+				},
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":status": {S: aws.String(status)},
+				},
+			})
+			if queryErr != nil {
+				err = queryErr
+				break
+			}
+			allItems = append(allItems, queryResult.Items...)
+		}
+		if err == nil {
+			result = &dynamodb.QueryOutput{Items: allItems}
 		}
 	default:
 		return errorResponse(400, "Invalid state filter", headers)
@@ -1438,31 +1470,9 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
 
-		// Skip deleted images unless specifically querying for them
-		if stateFilter != "deleted" && img.Status == "deleted" {
+		// Skip images that are already in a project (unless querying specifically for projects)
+		if img.ProjectID != "" && stateFilter != "all" {
 			continue
-		}
-
-		// Skip images that are already in a project
-		if img.ProjectID != "" {
-			continue
-		}
-
-		// Filter by state (approved vs rejected)
-		if stateFilter == "approved" && img.GroupNumber == 0 {
-			continue // Skip rejected (no group assigned)
-		}
-		if stateFilter == "rejected" && img.GroupNumber > 0 {
-			continue // Skip approved (has group assigned)
-		}
-
-		// Filter by group if specified
-		if groupFilter != "" && groupFilter != "all" {
-			groupNum := 0
-			fmt.Sscanf(groupFilter, "%d", &groupNum)
-			if img.GroupNumber != groupNum {
-				continue
-			}
 		}
 
 		// Deduplicate by OriginalFile - keep the most recently updated entry

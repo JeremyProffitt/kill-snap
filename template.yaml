@@ -224,6 +224,8 @@ Resources:
           AttributeType: S
         - AttributeName: OriginalFilename
           AttributeType: S
+        - AttributeName: GroupNumber
+          AttributeType: N
       KeySchema:
         - AttributeName: ImageGUID
           KeyType: HASH
@@ -256,6 +258,14 @@ Resources:
           KeySchema:
             - AttributeName: OriginalFilename
               KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GroupStatusIndex
+          KeySchema:
+            - AttributeName: GroupNumber
+              KeyType: HASH
+            - AttributeName: ImageGUID
+              KeyType: RANGE
           Projection:
             ProjectionType: ALL
 

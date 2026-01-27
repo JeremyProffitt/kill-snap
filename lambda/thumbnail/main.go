@@ -44,6 +44,7 @@ type ImageMetadata struct {
 	Height           int               `json:"Height"`
 	FileSize         int64             `json:"FileSize"`
 	Reviewed         string            `json:"Reviewed"`
+	Status           string            `json:"Status"`
 	Keywords         []string          `json:"Keywords,omitempty"`
 	Description      string            `json:"Description,omitempty"`
 	InsertedDateTime string            `json:"InsertedDateTime"`
@@ -605,6 +606,7 @@ func processJpgFile(bucket, key string) error {
 		Height:           height,
 		FileSize:         fileSize,
 		Reviewed:         "false",
+		Status:           "inbox",
 		InsertedDateTime: now,
 		UpdatedDateTime:  now,
 	}
