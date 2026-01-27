@@ -13,7 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -116,10 +116,10 @@ func main() {
 	errors := 0
 
 	for _, record := range needsFix {
-		// Derive thumbnail paths from original file
-		dir := filepath.Dir(record.OriginalFile)
-		baseName := strings.TrimSuffix(filepath.Base(record.OriginalFile), filepath.Ext(record.OriginalFile))
-		ext := strings.ToLower(filepath.Ext(record.OriginalFile))
+		// Derive thumbnail paths from original file (use path not filepath for forward slashes)
+		dir := path.Dir(record.OriginalFile)
+		baseName := strings.TrimSuffix(path.Base(record.OriginalFile), path.Ext(record.OriginalFile))
+		ext := strings.ToLower(path.Ext(record.OriginalFile))
 
 		thumb50 := fmt.Sprintf("%s/%s.50%s", dir, baseName, ext)
 		thumb400 := fmt.Sprintf("%s/%s.400%s", dir, baseName, ext)
