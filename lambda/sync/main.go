@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
@@ -125,6 +126,12 @@ func handler(ctx context.Context) (SyncResult, error) {
 				errMsg := fmt.Sprintf("Failed to unmarshal item: %v", err)
 				fmt.Println(errMsg)
 				result.Errors = append(result.Errors, errMsg)
+				continue
+			}
+
+			// Skip project images - they have different path conventions and should not be
+			// considered orphans even if the file has moved within the project folder
+			if record.Status == "project" || strings.HasPrefix(record.OriginalFile, "projects/") {
 				continue
 			}
 
