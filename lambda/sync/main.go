@@ -15,6 +15,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
+const (
+	// maxDeletionsPerRun prevents mass deletions due to bugs or misconfigurations.
+	// If this threshold is reached, the sync will abort and require manual review.
+	maxDeletionsPerRun = 100
+)
+
 var (
 	ddbClient  *dynamodb.DynamoDB
 	s3Client   *s3.S3
@@ -95,7 +101,17 @@ func handler(ctx context.Context) (SyncResult, error) {
 
 	// Scan all items from DynamoDB
 	var lastEvaluatedKey map[string]*dynamodb.AttributeValue
+	aborted := false
+
 	for {
+		// Safety check: abort if too many deletions to prevent mass data loss
+		if result.OrphansRemoved >= maxDeletionsPerRun {
+			errMsg := fmt.Sprintf("SAFETY ABORT: Deletion threshold reached (%d). Manual review required.", maxDeletionsPerRun)
+			fmt.Println(errMsg)
+			result.Errors = append(result.Errors, errMsg)
+			aborted = true
+			break
+		}
 		scanInput := &dynamodb.ScanInput{
 			TableName: aws.String(imageTable),
 			ProjectionExpression: aws.String("ImageGUID, OriginalFile, #bucket, #status"),
@@ -172,7 +188,11 @@ func handler(ctx context.Context) (SyncResult, error) {
 
 	result.Duration = time.Since(startTime).String()
 
-	fmt.Printf("\nSync completed in %s\n", result.Duration)
+	if aborted {
+		fmt.Printf("\nSync ABORTED after %s\n", result.Duration)
+	} else {
+		fmt.Printf("\nSync completed in %s\n", result.Duration)
+	}
 	fmt.Printf("Total scanned: %d\n", result.TotalScanned)
 	fmt.Printf("Orphans removed: %d\n", result.OrphansRemoved)
 	if len(result.Errors) > 0 {
