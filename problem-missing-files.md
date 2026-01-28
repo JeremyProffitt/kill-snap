@@ -242,4 +242,64 @@ aws sqs get-queue-attributes \
 
 ---
 
+---
+
+## CRITICAL: Project Images Data Loss (Discovered During Investigation)
+
+### Additional Issue: DynamoDBSyncFunction Bug
+
+The nightly sync function has been deleting DynamoDB records for images that were moved to project folders.
+
+#### Root Cause
+1. When images are added to projects, files move to `projects/{project_name}/...`
+2. The DynamoDB record's `OriginalFile` path may still point to the old location
+3. The sync function checks if files exist at `OriginalFile` path
+4. If not found (because files moved), it deletes the DynamoDB record as an "orphan"
+5. Result: S3 files exist but database records are gone
+
+#### Historical Damage
+
+| Date | Records Deleted |
+|------|-----------------|
+| Jan 19, 2026 | **3,118** |
+| Jan 16, 2026 | 266 |
+| Jan 18, 2026 | 39 |
+| Dec 20, 2025 | 37 |
+| Dec 9, 2025 | 73 |
+| Other dates | 59 |
+| **Total** | **~3,592** |
+
+#### Affected Projects
+
+Projects with S3 files but missing DynamoDB records:
+- **Grand Canyon Moon** - Only thumbnails remain, no originals
+- **Charlotte 2025** - Only thumbnails remain
+- **Building Target 2025** - Only thumbnails remain
+- **Family 2025** - Only thumbnails remain
+- Several other projects with partial data
+
+#### Projects with Intact Data (111 original images total)
+- South West (45 images)
+- Heavy Metal Polaroids (34 images)
+- Virgin Cruise 2024 (9 images)
+- Local Landscape (6 images)
+- Fire & Night (5 images)
+- Polaroid Abstracts (5 images)
+- Miami (4 images)
+- Kitchens (2 images)
+- Route 66 (1 image)
+
+### Recovery Options
+
+1. **For projects with original images in S3**: Create a recovery script to rebuild DynamoDB records from S3 files
+
+2. **For projects with only thumbnails**:
+   - Original images may be unrecoverable
+   - Check if originals exist in `images/`, `deleted/`, or `approved/` folders
+   - Check S3 versioning if enabled
+
+3. **Fix the sync function**: Add check to skip records where Status = "project" or OriginalFile starts with "projects/"
+
+---
+
 *Report generated: January 27, 2026*
