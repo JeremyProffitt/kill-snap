@@ -152,11 +152,22 @@ func main() {
 	needRecords := []S3ImageInfo{}
 
 	for _, img := range images {
+		// Check by GUID first
 		exists, err := recordExists(ddbClient, img.GUID)
 		if err != nil {
 			fmt.Printf("  Error checking %s: %v\n", img.GUID, err)
 			stats.Errors++
 			continue
+		}
+
+		// Also check if any record exists with this OriginalFile path (prevents duplicates with different GUIDs)
+		if !exists {
+			exists, err = recordExistsByPath(ddbClient, img.Key)
+			if err != nil {
+				fmt.Printf("  Error checking path %s: %v\n", img.Key, err)
+				stats.Errors++
+				continue
+			}
 		}
 
 		if exists {
@@ -465,6 +476,26 @@ func recordExists(ddbClient *dynamodb.DynamoDB, guid string) (bool, error) {
 	}
 
 	return result.Item != nil, nil
+}
+
+// recordExistsByPath checks if any DynamoDB record exists with the given OriginalFile path
+func recordExistsByPath(ddbClient *dynamodb.DynamoDB, originalFile string) (bool, error) {
+	input := &dynamodb.ScanInput{
+		TableName:        aws.String(imageTable),
+		FilterExpression: aws.String("OriginalFile = :path"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":path": {S: aws.String(originalFile)},
+		},
+		ProjectionExpression: aws.String("ImageGUID"),
+		Limit:                aws.Int64(1),
+	}
+
+	result, err := ddbClient.Scan(input)
+	if err != nil {
+		return false, err
+	}
+
+	return len(result.Items) > 0, nil
 }
 
 // createRecord creates a new DynamoDB record
