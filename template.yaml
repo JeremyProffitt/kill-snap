@@ -205,6 +205,46 @@ Resources:
       OKActions:
         - !Ref AlarmNotificationTopic
 
+  # Alarm: Sync Function Errors
+  SyncFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-sync-function-errors
+      AlarmDescription: DynamoDB Sync function is experiencing errors - check for data issues
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 86400  # 24 hours (runs once daily)
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: DynamoDBSyncFunction
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+
+  # Alarm: Sync Function Duration (indicates large scan or issues)
+  SyncFunctionDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: kill-snap-sync-function-duration
+      AlarmDescription: Sync function taking too long - may indicate table growth or issues
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Maximum
+      Period: 86400  # 24 hours
+      EvaluationPeriods: 1
+      Threshold: 600000  # 10 minutes in ms (function timeout is 15 min)
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: DynamoDBSyncFunction
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
   # DynamoDB table for image metadata
   ImageMetadataTable:
     Type: AWS::DynamoDB::Table

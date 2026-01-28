@@ -1,0 +1,64 @@
+{
+    "Rules": [
+        {
+            "ID": "DeleteAfter90Days",
+            "Status": "Enabled",
+            "Filter": {
+                "Prefix": "deleted/"
+            },
+            "Expiration": {
+                "Days": 90
+            }
+        },
+        {
+            "ID": "DeleteRejectedAfter1Year",
+            "Status": "Enabled",
+            "Filter": {
+                "Prefix": "rejected/"
+            },
+            "Expiration": {
+                "Days": 365
+            }
+        },
+        {
+            "ID": "DeleteProjectZipsAfter30Days",
+            "Status": "Enabled",
+            "Filter": {
+                "Prefix": "project-zips/"
+            },
+            "Expiration": {
+                "Days": 30
+            }
+        },
+        {
+            "ID": "DeleteCorruptedAfter90Days",
+            "Status": "Enabled",
+            "Filter": {
+                "Prefix": "corrupted/"
+            },
+            "Expiration": {
+                "Days": 90
+            }
+        },
+        {
+            "ID": "ExpireOldVersionsImages",
+            "Status": "Enabled",
+            "Filter": {
+                "Prefix": "images/"
+            },
+            "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 90
+            }
+        },
+        {
+            "ID": "ExpireOldVersionsProjects",
+            "Status": "Enabled",
+            "Filter": {
+                "Prefix": "projects/"
+            },
+            "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 90
+            }
+        }
+    ]
+}
