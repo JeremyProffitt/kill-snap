@@ -1352,6 +1352,28 @@ func handleLogin(request events.APIGatewayProxyRequest, headers map[string]strin
 	}, nil
 }
 
+// queryAllPages executes a DynamoDB query and handles pagination to return all results
+func queryAllPages(input *dynamodb.QueryInput) ([]map[string]*dynamodb.AttributeValue, error) {
+	var allItems []map[string]*dynamodb.AttributeValue
+
+	for {
+		result, err := ddbClient.Query(input)
+		if err != nil {
+			return nil, err
+		}
+		allItems = append(allItems, result.Items...)
+
+		// Check if there are more pages
+		if result.LastEvaluatedKey == nil {
+			break
+		}
+		// Set the start key for the next page
+		input.ExclusiveStartKey = result.LastEvaluatedKey
+	}
+
+	return allItems, nil
+}
+
 func handleListImages(request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
 	// Get filter parameters from query string
 	stateFilter := request.QueryStringParameters["state"]
@@ -1362,13 +1384,13 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		stateFilter = "unreviewed"
 	}
 
-	var result *dynamodb.QueryOutput
+	var allItems []map[string]*dynamodb.AttributeValue
 	var err error
 
 	// Determine query based on state filter using StatusIndex
 	switch stateFilter {
 	case "unreviewed":
-		// Query for inbox images using StatusIndex
+		// Query for inbox images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
 			IndexName:              aws.String("StatusIndex"),
@@ -1380,9 +1402,9 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("inbox")},
 			},
 		}
-		result, err = ddbClient.Query(input)
+		allItems, err = queryAllPages(input)
 	case "approved":
-		// Query for approved images using StatusIndex
+		// Query for approved images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
 			IndexName:              aws.String("StatusIndex"),
@@ -1401,9 +1423,9 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 			input.FilterExpression = aws.String("GroupNumber = :group")
 			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
 		}
-		result, err = ddbClient.Query(input)
+		allItems, err = queryAllPages(input)
 	case "rejected":
-		// Query for rejected images using StatusIndex
+		// Query for rejected images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
 			IndexName:              aws.String("StatusIndex"),
@@ -1415,9 +1437,9 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("rejected")},
 			},
 		}
-		result, err = ddbClient.Query(input)
+		allItems, err = queryAllPages(input)
 	case "deleted":
-		// Query for deleted images using StatusIndex
+		// Query for deleted images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
 			IndexName:              aws.String("StatusIndex"),
@@ -1429,13 +1451,12 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("deleted")},
 			},
 		}
-		result, err = ddbClient.Query(input)
+		allItems, err = queryAllPages(input)
 	case "all":
-		// Query each status and merge results (excluding deleted)
+		// Query each status and merge results (excluding deleted) with pagination
 		statuses := []string{"inbox", "approved", "rejected", "project"}
-		var allItems []map[string]*dynamodb.AttributeValue
 		for _, status := range statuses {
-			queryResult, queryErr := ddbClient.Query(&dynamodb.QueryInput{
+			items, queryErr := queryAllPages(&dynamodb.QueryInput{
 				TableName:              aws.String(imageTable),
 				IndexName:              aws.String("StatusIndex"),
 				KeyConditionExpression: aws.String("#status = :status"),
@@ -1450,10 +1471,7 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				err = queryErr
 				break
 			}
-			allItems = append(allItems, queryResult.Items...)
-		}
-		if err == nil {
-			result = &dynamodb.QueryOutput{Items: allItems}
+			allItems = append(allItems, items...)
 		}
 	default:
 		return errorResponse(400, "Invalid state filter", headers)
@@ -1466,7 +1484,7 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 
 	// Use a map to deduplicate by OriginalFile, keeping the most recent entry
 	seenFiles := make(map[string]ImageResponse)
-	for _, item := range result.Items {
+	for _, item := range allItems {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
 
