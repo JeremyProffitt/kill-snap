@@ -1374,18 +1374,98 @@ func queryAllPages(input *dynamodb.QueryInput) ([]map[string]*dynamodb.Attribute
 	return allItems, nil
 }
 
+// queryWithLimit executes a DynamoDB query with a limit and returns items plus the last evaluated key
+func queryWithLimit(input *dynamodb.QueryInput, limit int, startKey map[string]*dynamodb.AttributeValue) ([]map[string]*dynamodb.AttributeValue, map[string]*dynamodb.AttributeValue, error) {
+	var allItems []map[string]*dynamodb.AttributeValue
+
+	if startKey != nil {
+		input.ExclusiveStartKey = startKey
+	}
+
+	// Query until we have enough items or no more pages
+	for len(allItems) < limit {
+		result, err := ddbClient.Query(input)
+		if err != nil {
+			return nil, nil, err
+		}
+		allItems = append(allItems, result.Items...)
+
+		if result.LastEvaluatedKey == nil {
+			// No more pages
+			return allItems, nil, nil
+		}
+		input.ExclusiveStartKey = result.LastEvaluatedKey
+	}
+
+	// We have enough items, return with the last key for next page
+	return allItems[:limit], input.ExclusiveStartKey, nil
+}
+
+// encodeCursor encodes a DynamoDB key as a base64 cursor
+func encodeCursor(key map[string]*dynamodb.AttributeValue) string {
+	if key == nil {
+		return ""
+	}
+	data, err := json.Marshal(key)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+// decodeCursor decodes a base64 cursor back to a DynamoDB key
+func decodeCursor(cursor string) map[string]*dynamodb.AttributeValue {
+	if cursor == "" {
+		return nil
+	}
+	data, err := base64.StdEncoding.DecodeString(cursor)
+	if err != nil {
+		return nil
+	}
+	var key map[string]*dynamodb.AttributeValue
+	if err := json.Unmarshal(data, &key); err != nil {
+		return nil
+	}
+	return key
+}
+
+// PaginatedImageResponse wraps images with pagination metadata
+type PaginatedImageResponse struct {
+	Images     []ImageResponse `json:"images"`
+	NextCursor string          `json:"nextCursor,omitempty"`
+	HasMore    bool            `json:"hasMore"`
+	Total      int             `json:"total,omitempty"` // Only set on first page
+}
+
 func handleListImages(request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
 	// Get filter parameters from query string
 	stateFilter := request.QueryStringParameters["state"]
 	groupFilter := request.QueryStringParameters["group"]
+	cursor := request.QueryStringParameters["cursor"]
+	limitStr := request.QueryStringParameters["limit"]
 
 	// Default to unreviewed if no state specified
 	if stateFilter == "" {
 		stateFilter = "unreviewed"
 	}
 
+	// Parse limit (default 500, max 1000)
+	limit := 500
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+			if limit > 1000 {
+				limit = 1000
+			}
+		}
+	}
+
 	var allItems []map[string]*dynamodb.AttributeValue
+	var lastKey map[string]*dynamodb.AttributeValue
 	var err error
+
+	// Decode cursor if provided
+	startKey := decodeCursor(cursor)
 
 	// Determine query based on state filter using StatusIndex
 	switch stateFilter {
@@ -1402,7 +1482,7 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("inbox")},
 			},
 		}
-		allItems, err = queryAllPages(input)
+		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "approved":
 		// Query for approved images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
@@ -1423,7 +1503,7 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 			input.FilterExpression = aws.String("GroupNumber = :group")
 			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
 		}
-		allItems, err = queryAllPages(input)
+		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "rejected":
 		// Query for rejected images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
@@ -1437,7 +1517,7 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("rejected")},
 			},
 		}
-		allItems, err = queryAllPages(input)
+		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "deleted":
 		// Query for deleted images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
@@ -1451,9 +1531,9 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("deleted")},
 			},
 		}
-		allItems, err = queryAllPages(input)
+		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "all":
-		// Query each status and merge results (excluding deleted) with pagination
+		// Query each status and merge results (excluding deleted) - no pagination for "all"
 		statuses := []string{"inbox", "approved", "rejected", "project"}
 		for _, status := range statuses {
 			items, queryErr := queryAllPages(&dynamodb.QueryInput{
@@ -1473,6 +1553,7 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 			}
 			allItems = append(allItems, items...)
 		}
+		lastKey = nil // No pagination for "all"
 	default:
 		return errorResponse(400, "Invalid state filter", headers)
 	}
@@ -1534,7 +1615,14 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		images = append(images, img)
 	}
 
-	body, _ := json.Marshal(images)
+	// Build paginated response
+	response := PaginatedImageResponse{
+		Images:     images,
+		HasMore:    lastKey != nil,
+		NextCursor: encodeCursor(lastKey),
+	}
+
+	body, _ := json.Marshal(response)
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers:    headers,

@@ -111,6 +111,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const [images, setImages] = useState<Image[]>([]);
   const [selectedImageGUID, setSelectedImageGUID] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState<{ loaded: number; loading: boolean }>({ loaded: 0, loading: false });
   const [error, setError] = useState('');
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
   
@@ -242,16 +243,20 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
   const loadImages = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadingProgress({ loaded: 0, loading: true });
       let data: Image[];
 
       if (selectedProject) {
         data = await api.getProjectImages(selectedProject);
+        setLoadingProgress({ loaded: data.length, loading: false });
       } else {
         const filters: ImageFilters = {
           state: stateFilter,
           group: groupFilter,
         };
-        data = await api.getImages(filters);
+        data = await api.getImages(filters, (progress) => {
+          setLoadingProgress(progress);
+        });
       }
 
       setImages(data);
@@ -265,6 +270,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
       }
     } finally {
       setLoading(false);
+      setLoadingProgress(prev => ({ ...prev, loading: false }));
     }
   }, [stateFilter, groupFilter, selectedProject, onLogout]);
 
@@ -1580,7 +1586,15 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
 
       <main className="gallery-main" ref={galleryRef}>
         {loading ? (
-          <PageSkeleton sections={3} />
+          <div className="loading-container">
+            <PageSkeleton sections={3} />
+            {loadingProgress.loaded > 0 && (
+              <div className="loading-progress">
+                Loading images... {loadingProgress.loaded.toLocaleString()} loaded
+                {loadingProgress.loading && <span className="loading-dots">...</span>}
+              </div>
+            )}
+          </div>
         ) : error ? (
           <div className="error-message">{error}</div>
         ) : filteredImages.length === 0 ? (

@@ -44,6 +44,18 @@ export interface ImageFilters {
   group?: number | 'all';
 }
 
+export interface PaginatedImageResponse {
+  images: Image[];
+  nextCursor?: string;
+  hasMore: boolean;
+  total?: number;
+}
+
+export interface LoadingProgress {
+  loaded: number;
+  loading: boolean;
+}
+
 export interface SystemStats {
   incomingCount: number;
   processedCount: number;
@@ -58,25 +70,44 @@ export interface SystemStats {
 }
 
 export const api = {
-  async getImages(filters?: ImageFilters): Promise<Image[]> {
-    const params = new URLSearchParams();
-    if (filters?.state) {
-      params.append('state', filters.state);
-    }
-    if (filters?.group !== undefined && filters.group !== 'all') {
-      params.append('group', String(filters.group));
-    }
-    const queryString = params.toString();
-    const url = queryString
-      ? `${API_BASE_URL}/api/images?${queryString}`
-      : `${API_BASE_URL}/api/images`;
+  async getImages(filters?: ImageFilters, onProgress?: (progress: LoadingProgress) => void): Promise<Image[]> {
+    const allImages: Image[] = [];
+    let cursor: string | undefined;
+    let hasMore = true;
 
-    const response = await withRetry(() =>
-      axios.get<Image[]>(url, {
-        headers: authService.getAuthHeader(),
-      })
-    );
-    return response.data;
+    while (hasMore) {
+      const params = new URLSearchParams();
+      if (filters?.state) {
+        params.append('state', filters.state);
+      }
+      if (filters?.group !== undefined && filters.group !== 'all') {
+        params.append('group', String(filters.group));
+      }
+      params.append('limit', '500');
+      if (cursor) {
+        params.append('cursor', cursor);
+      }
+
+      const url = `${API_BASE_URL}/api/images?${params.toString()}`;
+
+      const response = await withRetry(() =>
+        axios.get<PaginatedImageResponse>(url, {
+          headers: authService.getAuthHeader(),
+        })
+      );
+
+      const data = response.data;
+      allImages.push(...data.images);
+      hasMore = data.hasMore;
+      cursor = data.nextCursor;
+
+      // Report progress
+      if (onProgress) {
+        onProgress({ loaded: allImages.length, loading: hasMore });
+      }
+    }
+
+    return allImages;
   },
 
   async updateImage(imageId: string, update: UpdateImageRequest): Promise<void> {
