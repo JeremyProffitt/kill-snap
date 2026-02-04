@@ -1512,9 +1512,25 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		}
 	}
 
-	// Convert map to slice
+	// Convert map to slice, stripping heavy fields to reduce payload size
+	// Keep: DateTimeOriginal (for date grouping), Keywords (for search)
+	// Strip: Description, RelatedFiles, verbose EXIF fields
 	images := make([]ImageResponse, 0, len(seenFiles))
 	for _, img := range seenFiles {
+		// Keep only essential EXIF fields for date grouping
+		if img.EXIFData != nil {
+			essentialExif := make(map[string]string)
+			if v, ok := img.EXIFData["DateTimeOriginal"]; ok {
+				essentialExif["DateTimeOriginal"] = v
+			}
+			if v, ok := img.EXIFData["DateTime"]; ok {
+				essentialExif["DateTime"] = v
+			}
+			img.EXIFData = essentialExif
+		}
+		// Clear heavy fields to keep response under Lambda's 6MB limit
+		img.Description = ""
+		img.RelatedFiles = nil
 		images = append(images, img)
 	}
 
