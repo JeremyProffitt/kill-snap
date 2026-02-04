@@ -89,6 +89,29 @@ const formatDateForDisplay = (dateStr: string): string => {
   });
 };
 
+// Extract month from date string (e.g., "2024-12" from "2024-12-15")
+const getImageMonth = (image: Image): string => {
+  const date = getImageDate(image);
+  if (date === 'Unknown') return 'Unknown';
+  return date.substring(0, 7); // "YYYY-MM"
+};
+
+// Format month for display (e.g., "Dec 2024" from "2024-12")
+const formatMonthForDisplay = (monthStr: string): string => {
+  if (monthStr === 'Unknown') return 'Unknown Month';
+  const [year, month] = monthStr.split('-');
+  const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    year: 'numeric'
+  });
+};
+
+// Check if a selection is a month (YYYY-MM) or a date (YYYY-MM-DD)
+const isMonthSelection = (selection: string): boolean => {
+  return selection.length === 7 && /^\d{4}-\d{2}$/.test(selection);
+};
+
 // Fuzzy match function for search
 const fuzzyMatch = (text: string, query: string): boolean => {
   const lowerText = text.toLowerCase();
@@ -357,21 +380,37 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     return result;
   }, [images, debouncedFilename, debouncedKeyword]);
 
-  // Calculate date counts from filtered images
-  const dateCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
+  // Calculate date and month counts from filtered images
+  const { dateCounts, monthCounts } = useMemo(() => {
+    const dateCnts: Record<string, number> = {};
+    const monthCnts: Record<string, number> = {};
+
     searchFilteredImages.forEach(img => {
       const date = getImageDate(img);
-      counts[date] = (counts[date] || 0) + 1;
+      const month = getImageMonth(img);
+      dateCnts[date] = (dateCnts[date] || 0) + 1;
+      monthCnts[month] = (monthCnts[month] || 0) + 1;
     });
-    return Object.entries(counts)
+
+    const sortedDates = Object.entries(dateCnts)
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([date, count]) => ({ date, count }));
+
+    const sortedMonths = Object.entries(monthCnts)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, count]) => ({ month, count }));
+
+    return { dateCounts: sortedDates, monthCounts: sortedMonths };
   }, [searchFilteredImages]);
 
-  // Filter images by selected date
+  // Filter images by selected date or month
   const filteredImages = useMemo(() => {
     if (!selectedDate) return searchFilteredImages;
+
+    // Check if it's a month selection (YYYY-MM) or date selection (YYYY-MM-DD)
+    if (isMonthSelection(selectedDate)) {
+      return searchFilteredImages.filter(img => getImageMonth(img) === selectedDate);
+    }
     return searchFilteredImages.filter(img => getImageDate(img) === selectedDate);
   }, [searchFilteredImages, selectedDate]);
 
@@ -1370,11 +1409,24 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                   className="sidebar-select"
                 >
                   <option value="">All Dates</option>
-                  {dateCounts.map(({ date, count }) => (
-                    <option key={date} value={date}>
-                      {formatDateForDisplay(date)} ({count})
-                    </option>
-                  ))}
+                  {monthCounts.length > 0 && (
+                    <optgroup label="By Month">
+                      {monthCounts.map(({ month, count }) => (
+                        <option key={month} value={month}>
+                          {formatMonthForDisplay(month)} ({count})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {dateCounts.length > 0 && (
+                    <optgroup label="By Day">
+                      {dateCounts.map(({ date, count }) => (
+                        <option key={date} value={date}>
+                          {formatDateForDisplay(date)} ({count})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
 
