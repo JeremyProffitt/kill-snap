@@ -1485,7 +1485,13 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "approved":
 		// Query for approved images using StatusIndex with pagination
-		input := &dynamodb.QueryInput{
+		// Also include inbox images that have been reviewed with a group (async move pending)
+		groupNum := 0
+		if groupFilter != "" && groupFilter != "all" {
+			fmt.Sscanf(groupFilter, "%d", &groupNum)
+		}
+
+		approvedInput := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
 			IndexName:              aws.String("StatusIndex"),
 			KeyConditionExpression: aws.String("#status = :status"),
@@ -1496,14 +1502,35 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("approved")},
 			},
 		}
-		// Add FilterExpression for group if specified
-		if groupFilter != "" && groupFilter != "all" {
-			groupNum := 0
-			fmt.Sscanf(groupFilter, "%d", &groupNum)
-			input.FilterExpression = aws.String("GroupNumber = :group")
-			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+		if groupNum > 0 {
+			approvedInput.FilterExpression = aws.String("GroupNumber = :group")
+			approvedInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
 		}
-		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
+		allItems, lastKey, err = queryWithLimit(approvedInput, limit, startKey)
+
+		// Also query inbox images that have been reviewed and grouped (async move not yet complete)
+		if err == nil && groupNum > 0 {
+			inboxInput := &dynamodb.QueryInput{
+				TableName:              aws.String(imageTable),
+				IndexName:              aws.String("StatusIndex"),
+				KeyConditionExpression: aws.String("#status = :status"),
+				ExpressionAttributeNames: map[string]*string{
+					"#status": aws.String("Status"),
+				},
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":status":   {S: aws.String("inbox")},
+					":group":    {N: aws.String(fmt.Sprintf("%d", groupNum))},
+					":reviewed": {S: aws.String("true")},
+				},
+				FilterExpression: aws.String("GroupNumber = :group AND Reviewed = :reviewed"),
+			}
+			inboxItems, _, inboxErr := queryWithLimit(inboxInput, limit, nil)
+			if inboxErr != nil {
+				err = inboxErr
+			} else {
+				allItems = append(allItems, inboxItems...)
+			}
+		}
 	case "rejected":
 		// Query for rejected images using StatusIndex with pagination
 		input := &dynamodb.QueryInput{
@@ -2326,32 +2353,52 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		imagesToProcess = append(imagesToProcess, imgResult.Item)
 	} else {
 		// Query approved images (Status = 'approved')
-		queryInput := &dynamodb.QueryInput{
-			TableName:              aws.String(imageTable),
-			IndexName:              aws.String("StatusIndex"),
-			KeyConditionExpression: aws.String("#status = :status"),
-			ExpressionAttributeNames: map[string]*string{
-				"#status": aws.String("Status"),
-			},
-			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":status": {S: aws.String("approved")},
-			},
-		}
-
-		// Add group filter if not "all"
+		// Also query inbox images with a group assigned (async move may not have completed yet)
+		statusesToQuery := []string{"approved"}
 		if !req.All && req.Group > 0 {
-			queryInput.FilterExpression = aws.String("GroupNumber = :group")
-			queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{
-				N: aws.String(fmt.Sprintf("%d", req.Group)),
-			}
+			// Include inbox images that have been grouped but async move hasn't finished
+			statusesToQuery = append(statusesToQuery, "inbox")
 		}
 
-		result, err := ddbClient.Query(queryInput)
-		if err != nil {
-			fmt.Printf("Error querying approved images: %v\n", err)
-			return errorResponse(500, "Failed to query images", headers)
+		for _, status := range statusesToQuery {
+			queryInput := &dynamodb.QueryInput{
+				TableName:              aws.String(imageTable),
+				IndexName:              aws.String("StatusIndex"),
+				KeyConditionExpression: aws.String("#status = :status"),
+				ExpressionAttributeNames: map[string]*string{
+					"#status": aws.String("Status"),
+				},
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":status": {S: aws.String(status)},
+				},
+			}
+
+			// Add group filter if not "all"
+			if !req.All && req.Group > 0 {
+				if status == "inbox" {
+					// For inbox images, require both group match AND reviewed=true
+					queryInput.FilterExpression = aws.String("GroupNumber = :group AND Reviewed = :reviewed")
+					queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{
+						N: aws.String(fmt.Sprintf("%d", req.Group)),
+					}
+					queryInput.ExpressionAttributeValues[":reviewed"] = &dynamodb.AttributeValue{
+						S: aws.String("true"),
+					}
+				} else {
+					queryInput.FilterExpression = aws.String("GroupNumber = :group")
+					queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{
+						N: aws.String(fmt.Sprintf("%d", req.Group)),
+					}
+				}
+			}
+
+			result, err := ddbClient.Query(queryInput)
+			if err != nil {
+				fmt.Printf("Error querying %s images: %v\n", status, err)
+				return errorResponse(500, "Failed to query images", headers)
+			}
+			imagesToProcess = append(imagesToProcess, result.Items...)
 		}
-		imagesToProcess = result.Items
 	}
 
 	// Move each image to project folder using sanitized S3 prefix
