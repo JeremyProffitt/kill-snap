@@ -2415,12 +2415,12 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 				}
 			}
 
-			result, err := ddbClient.Query(queryInput)
+			items, err := queryAllPages(queryInput)
 			if err != nil {
 				fmt.Printf("Error querying %s images: %v\n", status, err)
 				return errorResponse(500, "Failed to query images", headers)
 			}
-			imagesToProcess = append(imagesToProcess, result.Items...)
+			imagesToProcess = append(imagesToProcess, items...)
 		}
 	}
 
