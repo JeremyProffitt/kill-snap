@@ -1467,6 +1467,12 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 	// Decode cursor if provided
 	startKey := decodeCursor(cursor)
 
+	// Parse group filter once for all cases
+	groupNum := 0
+	if groupFilter != "" && groupFilter != "all" {
+		fmt.Sscanf(groupFilter, "%d", &groupNum)
+	}
+
 	// Determine query based on state filter using StatusIndex
 	switch stateFilter {
 	case "unreviewed":
@@ -1482,15 +1488,14 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("inbox")},
 			},
 		}
+		if groupNum > 0 {
+			input.FilterExpression = aws.String("GroupNumber = :group")
+			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+		}
 		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "approved":
 		// Query for approved images using StatusIndex with pagination
 		// Also include inbox images that have been reviewed with a group (async move pending)
-		groupNum := 0
-		if groupFilter != "" && groupFilter != "all" {
-			fmt.Sscanf(groupFilter, "%d", &groupNum)
-		}
-
 		approvedInput := &dynamodb.QueryInput{
 			TableName:              aws.String(imageTable),
 			IndexName:              aws.String("StatusIndex"),
@@ -1548,6 +1553,10 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("rejected")},
 			},
 		}
+		if groupNum > 0 {
+			input.FilterExpression = aws.String("GroupNumber = :group")
+			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+		}
 		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "deleted":
 		// Query for deleted images using StatusIndex with pagination
@@ -1562,12 +1571,16 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				":status": {S: aws.String("deleted")},
 			},
 		}
+		if groupNum > 0 {
+			input.FilterExpression = aws.String("GroupNumber = :group")
+			input.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+		}
 		allItems, lastKey, err = queryWithLimit(input, limit, startKey)
 	case "all":
 		// Query each status and merge results (excluding deleted) - no pagination for "all"
 		statuses := []string{"inbox", "approved", "rejected", "project"}
 		for _, status := range statuses {
-			items, queryErr := queryAllPages(&dynamodb.QueryInput{
+			queryInput := &dynamodb.QueryInput{
 				TableName:              aws.String(imageTable),
 				IndexName:              aws.String("StatusIndex"),
 				KeyConditionExpression: aws.String("#status = :status"),
@@ -1577,7 +1590,12 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 					":status": {S: aws.String(status)},
 				},
-			})
+			}
+			if groupNum > 0 {
+				queryInput.FilterExpression = aws.String("GroupNumber = :group")
+				queryInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+			}
+			items, queryErr := queryAllPages(queryInput)
 			if queryErr != nil {
 				err = queryErr
 				break
