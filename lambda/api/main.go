@@ -1526,12 +1526,13 @@ func handleListImages(request events.APIGatewayProxyRequest, headers map[string]
 					":status":   {S: aws.String("inbox")},
 					":reviewed": {S: aws.String("true")},
 				},
-				FilterExpression: aws.String("Reviewed = :reviewed AND GroupNumber > :zero"),
 			}
-			inboxInput.ExpressionAttributeValues[":zero"] = &dynamodb.AttributeValue{N: aws.String("0")}
 			if groupNum > 0 {
 				inboxInput.FilterExpression = aws.String("Reviewed = :reviewed AND GroupNumber = :group")
 				inboxInput.ExpressionAttributeValues[":group"] = &dynamodb.AttributeValue{N: aws.String(fmt.Sprintf("%d", groupNum))}
+			} else {
+				inboxInput.FilterExpression = aws.String("Reviewed = :reviewed AND GroupNumber > :zero")
+				inboxInput.ExpressionAttributeValues[":zero"] = &dynamodb.AttributeValue{N: aws.String("0")}
 			}
 			inboxItems, _, inboxErr := queryWithLimit(inboxInput, limit, nil)
 			if inboxErr != nil {
