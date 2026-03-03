@@ -191,19 +191,36 @@ export const api = {
   },
 
   async getApprovedImages(filters: AddToProjectRequest): Promise<Image[]> {
-    // Get approved images that match the filter criteria
-    const params = new URLSearchParams();
-    params.append('state', 'approved');
-    if (!filters.all && filters.group !== undefined) {
-      params.append('group', String(filters.group));
+    // Get approved images that match the filter criteria (handles paginated response)
+    const allImages: Image[] = [];
+    let cursor: string | undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const params = new URLSearchParams();
+      params.append('state', 'approved');
+      if (!filters.all && filters.group !== undefined) {
+        params.append('group', String(filters.group));
+      }
+      params.append('limit', '500');
+      if (cursor) {
+        params.append('cursor', cursor);
+      }
+
+      const response = await withRetry(() =>
+        axios.get<PaginatedImageResponse>(
+          `${API_BASE_URL}/api/images?${params.toString()}`,
+          { headers: authService.getAuthHeader() }
+        )
+      );
+
+      const data = response.data;
+      allImages.push(...data.images);
+      hasMore = data.hasMore;
+      cursor = data.nextCursor;
     }
-    const response = await withRetry(() =>
-      axios.get<Image[]>(
-        `${API_BASE_URL}/api/images?${params.toString()}`,
-        { headers: authService.getAuthHeader() }
-      )
-    );
-    return response.data;
+
+    return allImages;
   },
 
   async addToProjectWithProgress(
