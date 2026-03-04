@@ -2634,21 +2634,22 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 				rootKeys = append(rootKeys, *obj.Key)
 			}
 		}
-		// Also search in common prefixes
-		for _, prefix := range []string{"inbox/", "approved/", "projects/"} {
-			prefixResult, prefixErr := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
-				Bucket:  aws.String(bucketName),
-				Prefix:  aws.String(prefix),
-				MaxKeys: aws.Int64(1000),
-			})
-			if prefixErr == nil {
-				for _, obj := range prefixResult.Contents {
-					if strings.Contains(*obj.Key, diagImg.ImageGUID) {
-						rootKeys = append(rootKeys, fmt.Sprintf("[%s]%s", prefix, *obj.Key))
-					}
+		// Search the specific directory where the file SHOULD be
+		dirPrefix := diagImg.OriginalFile[:strings.LastIndex(diagImg.OriginalFile, "/")+1]
+		dirResult, dirErr := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
+			Bucket:  aws.String(bucketName),
+			Prefix:  aws.String(dirPrefix),
+			MaxKeys: aws.Int64(100),
+		})
+		var dirFiles []string
+		if dirErr == nil {
+			for _, obj := range dirResult.Contents {
+				if strings.Contains(*obj.Key, diagImg.ImageGUID[:8]) {
+					dirFiles = append(dirFiles, fmt.Sprintf("%s(%d)", *obj.Key, *obj.Size))
 				}
 			}
 		}
+		rootKeys = append(rootKeys, dirFiles...)
 		// HeadObject check on the expected path
 		_, headErr := s3Client.HeadObject(&s3.HeadObjectInput{
 			Bucket: aws.String(bucketName),
