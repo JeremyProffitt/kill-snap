@@ -6,6 +6,15 @@ const PASSWORD = 'KillSnap4President!';
 
 let authToken = '';
 
+// Helper: take screenshot safely (don't fail test on screenshot errors)
+async function safeScreenshot(page: Page, path: string) {
+  try {
+    await page.screenshot({ path, fullPage: true });
+  } catch {
+    console.log(`Warning: screenshot failed for ${path}`);
+  }
+}
+
 // Helper: login via API and set token
 async function loginViaAPI(): Promise<string> {
   const resp = await fetch(`${BASE_URL}/api/login`, {
@@ -82,7 +91,7 @@ test.describe('Kill-Snap E2E Tests', () => {
       }
     }
 
-    await page.screenshot({ path: 'tests/screenshots/01-gallery.png', fullPage: true });
+    await safeScreenshot(page, 'tests/screenshots/01-gallery.png');
     console.log('\nTest 1 PASSED: Logged in and inventoried state');
   });
 
@@ -193,7 +202,7 @@ test.describe('Kill-Snap E2E Tests', () => {
     await page.reload();
     await page.waitForSelector('img', { timeout: 15000 });
     await page.waitForTimeout(2000);
-    await page.screenshot({ path: 'tests/screenshots/02-before-add.png', fullPage: true });
+    await safeScreenshot(page, 'tests/screenshots/02-before-add.png');
 
     console.log('\nTest 2 PASSED: Group assignment and add-to-project workflow tested');
   });
@@ -469,14 +478,14 @@ test.describe('Kill-Snap E2E Tests', () => {
     const sidebar = page.locator('.sidebar, [class*="sidebar"]').first();
 
     // Take initial screenshot
-    await page.screenshot({ path: 'tests/screenshots/05-initial.png', fullPage: true });
+    await safeScreenshot(page, 'tests/screenshots/05-initial.png');
 
     // Try clicking "Approved" or finding state tabs
     const approvedLink = page.locator('a:has-text("Approved"), button:has-text("Approved"), [class*="state"]:has-text("Approved"), .sidebar-section:has-text("Approved")').first();
     if (await approvedLink.count() > 0) {
       await approvedLink.click();
       await page.waitForTimeout(2000);
-      await page.screenshot({ path: 'tests/screenshots/05-approved.png', fullPage: true });
+      await safeScreenshot(page, 'tests/screenshots/05-approved.png');
 
       const imgCount = await page.locator('img[src*="thumbnail"], img[src*="images"], .image-card img').count();
       console.log(`Approved images visible in UI: ${imgCount}`);
@@ -487,7 +496,7 @@ test.describe('Kill-Snap E2E Tests', () => {
     if (await group1Btn.count() > 0) {
       await group1Btn.click();
       await page.waitForTimeout(2000);
-      await page.screenshot({ path: 'tests/screenshots/05-group1.png', fullPage: true });
+      await safeScreenshot(page, 'tests/screenshots/05-group1.png');
 
       const imgCount = await page.locator('img[src*="thumbnail"], img[src*="images"], .image-card img').count();
       console.log(`Group 1 images visible: ${imgCount}`);
@@ -522,7 +531,7 @@ test.describe('Kill-Snap E2E Tests', () => {
             }
 
             await page.waitForTimeout(3000);
-            await page.screenshot({ path: 'tests/screenshots/05-after-add.png', fullPage: true });
+            await safeScreenshot(page, 'tests/screenshots/05-after-add.png');
           }
           break;
         }
