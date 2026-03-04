@@ -2613,6 +2613,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 	s3Prefix := getProjectS3Prefix(project)
 	fmt.Printf("Total images to process: %d, S3Prefix: %s, Bucket: %s\n", len(imagesToProcess), s3Prefix, bucketName)
 	movedCount := 0
+	var moveErrors []string
 	for _, item := range imagesToProcess {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
@@ -2636,6 +2637,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 					},
 				})
 				if retryErr != nil || retryResult.Item == nil {
+					moveErrors = append(moveErrors, fmt.Sprintf("%s: source missing, not in DB", img.ImageGUID))
 					fmt.Printf("Image %s no longer exists in database, skipping\n", img.ImageGUID)
 					continue
 				}
@@ -2651,14 +2653,17 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 					destPrefix = fmt.Sprintf("projects/%s/%s", s3Prefix, datePath)
 					newPaths, err = moveImageFiles(bucketName, img, destPrefix)
 					if err != nil {
+						moveErrors = append(moveErrors, fmt.Sprintf("%s: retry failed: %v (src=%s)", img.ImageGUID, err, img.OriginalFile))
 						fmt.Printf("Retry failed for image %s: %v\n", img.ImageGUID, err)
 						continue
 					}
 				} else {
+					moveErrors = append(moveErrors, fmt.Sprintf("%s: source missing, paths unchanged (src=%s)", img.ImageGUID, img.OriginalFile))
 					fmt.Printf("Image %s paths unchanged, source truly missing, skipping\n", img.ImageGUID)
 					continue
 				}
 			} else {
+				moveErrors = append(moveErrors, fmt.Sprintf("%s: move failed: %v (src=%s)", img.ImageGUID, err, img.OriginalFile))
 				continue
 			}
 		}
@@ -2767,7 +2772,15 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		},
 	})
 
-	body, _ := json.Marshal(map[string]int{"movedCount": movedCount})
+	body, _ := json.Marshal(map[string]interface{}{
+		"movedCount":     movedCount,
+		"queriedCount":   len(imagesToProcess),
+		"requestGroup":   req.Group,
+		"requestAll":     req.All,
+		"requestGUID":    req.ImageGUID,
+		"s3Prefix":       s3Prefix,
+		"moveErrors":     moveErrors,
+	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers:    headers,
