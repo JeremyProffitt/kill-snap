@@ -2657,9 +2657,28 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		})
 		headStatus := "EXISTS"
 		if headErr != nil {
-			headStatus = fmt.Sprintf("MISSING(%v)", headErr)
+			headStatus = "MISSING"
 		}
-		s3Diagnostics = append(s3Diagnostics, fmt.Sprintf("%s: expected=%s head=%s found=%v", diagImg.ImageGUID, diagImg.OriginalFile, headStatus, rootKeys))
+		// Also check the original images/ path (pre-move location)
+		imagesKey := fmt.Sprintf("images/%s.jpg", diagImg.ImageGUID)
+		_, imagesHeadErr := s3Client.HeadObject(&s3.HeadObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(imagesKey),
+		})
+		imagesStatus := "EXISTS"
+		if imagesHeadErr != nil {
+			imagesStatus = "MISSING"
+		}
+		// Check thumbnail400 as a reference
+		_, t400HeadErr := s3Client.HeadObject(&s3.HeadObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(diagImg.Thumbnail400),
+		})
+		t400Status := "EXISTS"
+		if t400HeadErr != nil {
+			t400Status = "MISSING"
+		}
+		s3Diagnostics = append(s3Diagnostics, fmt.Sprintf("%s: orig@expected=%s orig@images=%s t400=%s dir_matches=%v", diagImg.ImageGUID, headStatus, imagesStatus, t400Status, dirFiles))
 	}
 	for _, item := range imagesToProcess {
 		var img ImageResponse
