@@ -2614,6 +2614,52 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 	fmt.Printf("Total images to process: %d, S3Prefix: %s, Bucket: %s\n", len(imagesToProcess), s3Prefix, bucketName)
 	movedCount := 0
 	var moveErrors []string
+	// Diagnostic: search S3 for actual file locations of first 2 images
+	var s3Diagnostics []string
+	for i, item := range imagesToProcess {
+		if i >= 2 {
+			break
+		}
+		var diagImg ImageResponse
+		dynamodbattribute.UnmarshalMap(item, &diagImg)
+		// Search for this GUID anywhere in the bucket
+		listResult, listErr := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
+			Bucket:  aws.String(bucketName),
+			Prefix:  aws.String(diagImg.ImageGUID),
+			MaxKeys: aws.Int64(10),
+		})
+		var rootKeys []string
+		if listErr == nil {
+			for _, obj := range listResult.Contents {
+				rootKeys = append(rootKeys, *obj.Key)
+			}
+		}
+		// Also search in common prefixes
+		for _, prefix := range []string{"inbox/", "approved/", "projects/"} {
+			prefixResult, prefixErr := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
+				Bucket:  aws.String(bucketName),
+				Prefix:  aws.String(prefix),
+				MaxKeys: aws.Int64(1000),
+			})
+			if prefixErr == nil {
+				for _, obj := range prefixResult.Contents {
+					if strings.Contains(*obj.Key, diagImg.ImageGUID) {
+						rootKeys = append(rootKeys, fmt.Sprintf("[%s]%s", prefix, *obj.Key))
+					}
+				}
+			}
+		}
+		// HeadObject check on the expected path
+		_, headErr := s3Client.HeadObject(&s3.HeadObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(diagImg.OriginalFile),
+		})
+		headStatus := "EXISTS"
+		if headErr != nil {
+			headStatus = fmt.Sprintf("MISSING(%v)", headErr)
+		}
+		s3Diagnostics = append(s3Diagnostics, fmt.Sprintf("%s: expected=%s head=%s found=%v", diagImg.ImageGUID, diagImg.OriginalFile, headStatus, rootKeys))
+	}
 	for _, item := range imagesToProcess {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
@@ -2780,6 +2826,8 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		"requestGUID":    req.ImageGUID,
 		"s3Prefix":       s3Prefix,
 		"moveErrors":     moveErrors,
+		"s3Diagnostics":  s3Diagnostics,
+		"bucket":         bucketName,
 	})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
