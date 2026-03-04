@@ -883,6 +883,26 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 	var img ImageResponse
 	dynamodbattribute.UnmarshalMap(getResult.Item, &img)
 
+	// Check if the image has already progressed to a project (add-to-project ran while this async move was pending).
+	// In that case, skip the move to avoid overwriting project data.
+	if img.Status == "project" {
+		fmt.Printf("Image %s is already in a project (Status=%s, ProjectID=%s), skipping async move to prevent overwriting\n", req.ImageGUID, img.Status, img.ProjectID)
+		withRetryNoResult(func() error {
+			_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+				TableName: aws.String(imageTable),
+				Key: map[string]*dynamodb.AttributeValue{
+					"ImageGUID": {S: aws.String(req.ImageGUID)},
+				},
+				UpdateExpression: aws.String("SET MoveStatus = :status"),
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":status": {S: aws.String("complete")},
+				},
+			})
+			return updateErr
+		})
+		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": true, "skipped": true, "reason": "already in project"}`}, nil
+	}
+
 	// Move the files
 	newPaths, err := moveImageFiles(req.Bucket, img, req.DestPrefix)
 	if err != nil {
@@ -943,21 +963,24 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: fmt.Sprintf(`{"success": false, "error": "%v"}`, err)}, nil
 	}
 
-	// Update DynamoDB with new paths and complete status
+	// Update DynamoDB with new paths and complete status.
+	// Use a condition expression to prevent overwriting if the image was concurrently added to a project.
 	err = withRetryNoResult(func() error {
 		_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
 			TableName: aws.String(imageTable),
 			Key: map[string]*dynamodb.AttributeValue{
 				"ImageGUID": {S: aws.String(req.ImageGUID)},
 			},
-			UpdateExpression: aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :newStatus, MoveStatus = :moveStatus, UpdatedDateTime = :updated"),
+			UpdateExpression:    aws.String("SET OriginalFile = :orig, Thumbnail50 = :t50, Thumbnail400 = :t400, #status = :newStatus, MoveStatus = :moveStatus, UpdatedDateTime = :updated"),
+			ConditionExpression: aws.String("#status <> :projectStatus"),
 			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-				":orig":       {S: aws.String(newPaths["original"])},
-				":t50":        {S: aws.String(newPaths["thumbnail50"])},
-				":t400":       {S: aws.String(newPaths["thumbnail400"])},
-				":newStatus":  {S: aws.String(req.NewStatus)},
-				":moveStatus": {S: aws.String("complete")},
-				":updated":    {S: aws.String(time.Now().Format(time.RFC3339))},
+				":orig":          {S: aws.String(newPaths["original"])},
+				":t50":           {S: aws.String(newPaths["thumbnail50"])},
+				":t400":          {S: aws.String(newPaths["thumbnail400"])},
+				":newStatus":     {S: aws.String(req.NewStatus)},
+				":moveStatus":    {S: aws.String("complete")},
+				":updated":       {S: aws.String(time.Now().Format(time.RFC3339))},
+				":projectStatus": {S: aws.String("project")},
 			},
 			ExpressionAttributeNames: map[string]*string{
 				"#status": aws.String("Status"),
@@ -966,6 +989,26 @@ func handleAsyncMoveFiles(req AsyncMoveRequest, headers map[string]string) (even
 		return updateErr
 	})
 	if err != nil {
+		// Check if this was a condition check failure (image was added to project during our move)
+		if strings.Contains(err.Error(), "ConditionalCheckFailed") {
+			fmt.Printf("Image %s was added to project during async move, skipping DB update to preserve project data\n", req.ImageGUID)
+			// The S3 files were already copied to the approved/ path, but that's OK - they'll be
+			// orphaned but won't affect the project copy. Just update MoveStatus to complete.
+			withRetryNoResult(func() error {
+				_, updateErr := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+					TableName: aws.String(imageTable),
+					Key: map[string]*dynamodb.AttributeValue{
+						"ImageGUID": {S: aws.String(req.ImageGUID)},
+					},
+					UpdateExpression: aws.String("SET MoveStatus = :status"),
+					ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+						":status": {S: aws.String("complete")},
+					},
+				})
+				return updateErr
+			})
+			return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: `{"success": true, "skipped": true, "reason": "concurrently added to project"}`}, nil
+		}
 		fmt.Printf("Error updating image after move: %v\n", err)
 		return events.APIGatewayProxyResponse{StatusCode: 200, Headers: headers, Body: fmt.Sprintf(`{"success": false, "error": "%v"}`, err)}, nil
 	}
