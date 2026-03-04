@@ -455,9 +455,10 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSEventResp
 				continue
 			}
 
-			// Skip special folders
+			// Skip special folders and already-organized folders
 			if strings.HasPrefix(key, "deleted/") || strings.HasPrefix(key, "rejected/") ||
-				strings.HasPrefix(key, "corrupted/") || strings.HasPrefix(key, "project-zips/") {
+				strings.HasPrefix(key, "corrupted/") || strings.HasPrefix(key, "project-zips/") ||
+				strings.HasPrefix(key, "approved/") || strings.HasPrefix(key, "projects/") {
 				continue
 			}
 

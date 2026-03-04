@@ -2494,13 +2494,10 @@ func handleUpdateProject(projectID string, request events.APIGatewayProxyRequest
 }
 
 func handleAddToProject(projectID string, request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
-	fmt.Printf("=== ADD TO PROJECT START === ProjectID=%s\n", projectID)
 	var req AddToProjectRequest
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
-		fmt.Printf("ERROR: Invalid request body: %v\n", err)
 		return errorResponse(400, "Invalid request body", headers)
 	}
-	fmt.Printf("Request: Group=%d, All=%v, ImageGUID=%s\n", req.Group, req.All, req.ImageGUID)
 
 	// Get project to verify it exists
 	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
@@ -2611,75 +2608,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 
 	// Move each image to project folder using sanitized S3 prefix
 	s3Prefix := getProjectS3Prefix(project)
-	fmt.Printf("Total images to process: %d, S3Prefix: %s, Bucket: %s\n", len(imagesToProcess), s3Prefix, bucketName)
 	movedCount := 0
-	var moveErrors []string
-	// Diagnostic: search S3 for actual file locations of first 2 images
-	var s3Diagnostics []string
-	for i, item := range imagesToProcess {
-		if i >= 2 {
-			break
-		}
-		var diagImg ImageResponse
-		dynamodbattribute.UnmarshalMap(item, &diagImg)
-		// Search for this GUID anywhere in the bucket
-		listResult, listErr := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
-			Bucket:  aws.String(bucketName),
-			Prefix:  aws.String(diagImg.ImageGUID),
-			MaxKeys: aws.Int64(10),
-		})
-		var rootKeys []string
-		if listErr == nil {
-			for _, obj := range listResult.Contents {
-				rootKeys = append(rootKeys, *obj.Key)
-			}
-		}
-		// Search the specific directory where the file SHOULD be
-		dirPrefix := diagImg.OriginalFile[:strings.LastIndex(diagImg.OriginalFile, "/")+1]
-		dirResult, dirErr := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
-			Bucket:  aws.String(bucketName),
-			Prefix:  aws.String(dirPrefix),
-			MaxKeys: aws.Int64(100),
-		})
-		var dirFiles []string
-		if dirErr == nil {
-			for _, obj := range dirResult.Contents {
-				if strings.Contains(*obj.Key, diagImg.ImageGUID[:8]) {
-					dirFiles = append(dirFiles, fmt.Sprintf("%s(%d)", *obj.Key, *obj.Size))
-				}
-			}
-		}
-		rootKeys = append(rootKeys, dirFiles...)
-		// HeadObject check on the expected path
-		_, headErr := s3Client.HeadObject(&s3.HeadObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(diagImg.OriginalFile),
-		})
-		headStatus := "EXISTS"
-		if headErr != nil {
-			headStatus = "MISSING"
-		}
-		// Also check the original images/ path (pre-move location)
-		imagesKey := fmt.Sprintf("images/%s.jpg", diagImg.ImageGUID)
-		_, imagesHeadErr := s3Client.HeadObject(&s3.HeadObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(imagesKey),
-		})
-		imagesStatus := "EXISTS"
-		if imagesHeadErr != nil {
-			imagesStatus = "MISSING"
-		}
-		// Check thumbnail400 as a reference
-		_, t400HeadErr := s3Client.HeadObject(&s3.HeadObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(diagImg.Thumbnail400),
-		})
-		t400Status := "EXISTS"
-		if t400HeadErr != nil {
-			t400Status = "MISSING"
-		}
-		s3Diagnostics = append(s3Diagnostics, fmt.Sprintf("%s: orig@expected=%s orig@images=%s t400=%s dir_matches=%v", diagImg.ImageGUID, headStatus, imagesStatus, t400Status, dirFiles))
-	}
 	for _, item := range imagesToProcess {
 		var img ImageResponse
 		dynamodbattribute.UnmarshalMap(item, &img)
@@ -2703,7 +2632,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 					},
 				})
 				if retryErr != nil || retryResult.Item == nil {
-					moveErrors = append(moveErrors, fmt.Sprintf("%s: source missing, not in DB", img.ImageGUID))
+	
 					fmt.Printf("Image %s no longer exists in database, skipping\n", img.ImageGUID)
 					continue
 				}
@@ -2719,17 +2648,17 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 					destPrefix = fmt.Sprintf("projects/%s/%s", s3Prefix, datePath)
 					newPaths, err = moveImageFiles(bucketName, img, destPrefix)
 					if err != nil {
-						moveErrors = append(moveErrors, fmt.Sprintf("%s: retry failed: %v (src=%s)", img.ImageGUID, err, img.OriginalFile))
+	
 						fmt.Printf("Retry failed for image %s: %v\n", img.ImageGUID, err)
 						continue
 					}
 				} else {
-					moveErrors = append(moveErrors, fmt.Sprintf("%s: source missing, paths unchanged (src=%s)", img.ImageGUID, img.OriginalFile))
+	
 					fmt.Printf("Image %s paths unchanged, source truly missing, skipping\n", img.ImageGUID)
 					continue
 				}
 			} else {
-				moveErrors = append(moveErrors, fmt.Sprintf("%s: move failed: %v (src=%s)", img.ImageGUID, err, img.OriginalFile))
+	
 				continue
 			}
 		}
@@ -2838,17 +2767,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		},
 	})
 
-	body, _ := json.Marshal(map[string]interface{}{
-		"movedCount":     movedCount,
-		"queriedCount":   len(imagesToProcess),
-		"requestGroup":   req.Group,
-		"requestAll":     req.All,
-		"requestGUID":    req.ImageGUID,
-		"s3Prefix":       s3Prefix,
-		"moveErrors":     moveErrors,
-		"s3Diagnostics":  s3Diagnostics,
-		"bucket":         bucketName,
-	})
+	body, _ := json.Marshal(map[string]int{"movedCount": movedCount})
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers:    headers,

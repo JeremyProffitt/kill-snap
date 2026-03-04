@@ -360,7 +360,7 @@ test.describe('Kill-Snap E2E Tests', () => {
     // Verify images are now in approved state
     const approvedResp = await apiCall(page, 'GET', '/api/images?state=approved&group=1&limit=500');
     const approvedCount = approvedResp.data?.images?.length || 0;
-    console.log(`Approved images in group 2: ${approvedCount}`);
+    console.log(`Approved images in group 1: ${approvedCount}`);
 
     // Step 4: Add group 2 images to the project
     console.log('\n=== Adding images to project ===');
@@ -368,86 +368,28 @@ test.describe('Kill-Snap E2E Tests', () => {
     // First, log details about the approved images we expect to move
     const preAddResp = await apiCall(page, 'GET', '/api/images?state=approved&group=1&limit=500');
     const preAddImages = preAddResp.data?.images || [];
-    console.log(`Pre-add approved group 2 images: ${preAddImages.length}`);
+    console.log(`Pre-add approved group 1 images: ${preAddImages.length}`);
     for (const img of preAddImages) {
       console.log(`  ${img.imageGUID}: status=${img.status}, file=${img.originalFile}, moveStatus=${img.moveStatus || 'N/A'}`);
     }
 
     // Also check inbox images that might still be pending move
     const inboxResp = await apiCall(page, 'GET', '/api/images?state=unreviewed&group=1&limit=500');
-    console.log(`Inbox group 2 images: ${inboxResp.data?.images?.length || 0}`);
+    console.log(`Inbox group 1 images: ${inboxResp.data?.images?.length || 0}`);
 
     const addResp = await apiCall(page, 'POST', `/api/projects/${projectId}/images`, { group: 1 });
-    console.log(`Add to project response: ${JSON.stringify(addResp.data)}`);
-
-    // Wait for CloudWatch logs to propagate, then check for diagnostic output
-    console.log('Waiting 8s for CloudWatch log propagation...');
-    await page.waitForTimeout(8000);
-
-    // Check API Lambda logs - filter for our diagnostic markers
-    const apiLogsResp = await apiCall(page, 'GET', '/api/logs?function=ImageReviewApi&hours=1&filter=all');
-    if (apiLogsResp.status === 200 && apiLogsResp.data?.logs) {
-      const logs = apiLogsResp.data.logs;
-      // Filter for our diagnostic markers
-      const diagnosticLogs = logs.filter((l: any) =>
-        l.message?.includes('ADD TO PROJECT') ||
-        l.message?.includes('Total images to process') ||
-        l.message?.includes('Moving image') ||
-        l.message?.includes('Failed to move') ||
-        l.message?.includes('ErrSourceFileMissing') ||
-        l.message?.includes('movedCount') ||
-        l.message?.includes('NoSuchKey')
-      );
-      console.log(`\nDiagnostic log entries: ${diagnosticLogs.length}`);
-      for (const entry of diagnosticLogs) {
-        console.log(`  ${entry.message?.trim()}`);
-      }
-      if (diagnosticLogs.length === 0) {
-        console.log('  (No diagnostic logs found - may still be propagating)');
-        // Show last 15 non-platform entries
-        const appLogs = logs.filter((l: any) =>
-          !l.message?.startsWith('START') &&
-          !l.message?.startsWith('END') &&
-          !l.message?.startsWith('REPORT')
-        );
-        console.log(`  App log entries in window: ${appLogs.length}`);
-        for (const entry of appLogs.slice(-15)) {
-          console.log(`  ${entry.message?.trim()}`);
-        }
-      }
-    }
-
-    if (addResp.data?.movedCount === 0) {
-      // Debug: verify images are still approved
-      const recheckResp = await apiCall(page, 'GET', '/api/images?state=approved&group=1&limit=500');
-      console.log(`\nRecheck approved group 2: ${recheckResp.data?.images?.length || 0} images`);
-
-      // Try with a single image directly by GUID
-      if (preAddImages.length > 0) {
-        const singleImg = preAddImages[0];
-        console.log(`\nTrying single image add: ${singleImg.imageGUID}`);
-        const singleResp = await apiCall(page, 'POST', `/api/projects/${projectId}/images`, {
-          imageGUID: singleImg.imageGUID,
-        });
-        console.log(`Single image add response: ${JSON.stringify(singleResp.data)}`);
-      }
-    }
-
+    console.log(`Add to project: status=${addResp.status}, movedCount=${addResp.data?.movedCount}`);
     expect(addResp.status).toBe(200);
     const movedCount = addResp.data?.movedCount || 0;
-    console.log(`\nMoved count: ${movedCount}`);
-    if (movedCount === 0) {
-      console.log('WARNING: movedCount is 0, continuing to see if zip still works...');
-    }
+    expect(movedCount).toBeGreaterThan(0);
+    console.log(`Successfully moved ${movedCount} images to project`);
 
     // Verify project images
     await page.waitForTimeout(2000);
     const projImgsResp = await apiCall(page, 'GET', `/api/projects/${projectId}/images`);
     const projImgs = Array.isArray(projImgsResp.data) ? projImgsResp.data : [];
-    console.log(`Project images after add: ${projImgs.length}`);
-    for (const img of projImgs) {
-      console.log(`  ${img.imageGUID}: ${img.originalFile} (${img.fileSize} bytes)`);
-    }
+    console.log(`Project images: ${projImgs.length}`);
+    expect(projImgs.length).toBeGreaterThan(0);
 
     // Step 5: Generate zip
     console.log('\n=== Generating zip ===');
