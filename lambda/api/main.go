@@ -2494,10 +2494,13 @@ func handleUpdateProject(projectID string, request events.APIGatewayProxyRequest
 }
 
 func handleAddToProject(projectID string, request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	fmt.Printf("=== ADD TO PROJECT START === ProjectID=%s\n", projectID)
 	var req AddToProjectRequest
 	if err := json.Unmarshal([]byte(request.Body), &req); err != nil {
+		fmt.Printf("ERROR: Invalid request body: %v\n", err)
 		return errorResponse(400, "Invalid request body", headers)
 	}
+	fmt.Printf("Request: Group=%d, All=%v, ImageGUID=%s\n", req.Group, req.All, req.ImageGUID)
 
 	// Get project to verify it exists
 	projResult, err := ddbClient.GetItem(&dynamodb.GetItemInput{
@@ -2608,6 +2611,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 
 	// Move each image to project folder using sanitized S3 prefix
 	s3Prefix := getProjectS3Prefix(project)
+	fmt.Printf("Total images to process: %d, S3Prefix: %s, Bucket: %s\n", len(imagesToProcess), s3Prefix, bucketName)
 	movedCount := 0
 	for _, item := range imagesToProcess {
 		var img ImageResponse
@@ -2617,6 +2621,7 @@ func handleAddToProject(projectID string, request events.APIGatewayProxyRequest,
 		datePath := buildDatePath(imageDate)
 		destPrefix := fmt.Sprintf("projects/%s/%s", s3Prefix, datePath)
 
+		fmt.Printf("Moving image %s: src=%s -> dest=%s/\n", img.ImageGUID, img.OriginalFile, destPrefix)
 		newPaths, err := moveImageFiles(bucketName, img, destPrefix)
 		if err != nil {
 			fmt.Printf("Failed to move image %s: %v\n", img.ImageGUID, err)
