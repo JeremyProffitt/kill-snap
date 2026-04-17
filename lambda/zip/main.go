@@ -390,6 +390,43 @@ func isRAWFile(filename string) bool {
 	return rawExtensions[ext]
 }
 
+// discoverRawFilesInS3 lists the directory containing originalKey and returns
+// any sibling objects whose base name matches and whose extension is a RAW
+// format. Used at zip-time to catch RAWs that weren't recorded in RelatedFiles
+// (e.g. uploaded after addToProject ran, or when the move happened without a
+// DynamoDB update).
+func discoverRawFilesInS3(originalKey string) []string {
+	var found []string
+	if originalKey == "" {
+		return found
+	}
+	dir := filepath.Dir(originalKey)
+	baseNoExt := strings.ToLower(strings.TrimSuffix(filepath.Base(originalKey), filepath.Ext(originalKey)))
+	prefix := dir + "/"
+
+	err := s3Client.ListObjectsV2Pages(&s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+		Prefix: aws.String(prefix),
+	}, func(page *s3.ListObjectsV2Output, _ bool) bool {
+		for _, obj := range page.Contents {
+			key := aws.StringValue(obj.Key)
+			if key == originalKey {
+				continue
+			}
+			name := filepath.Base(key)
+			stem := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+			if stem == baseNoExt && isRAWFile(name) {
+				found = append(found, key)
+			}
+		}
+		return true
+	})
+	if err != nil {
+		fmt.Printf("  WARNING: RAW rescan failed for %s: %v\n", originalKey, err)
+	}
+	return found
+}
+
 // isJPGFile checks if a file extension is a JPG format
 func isJPGFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -643,8 +680,24 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 			}
 		}
 
+		// Merge DynamoDB-recorded RelatedFiles with a live S3 rescan so RAWs
+		// uploaded after addToProject (or otherwise missing from DynamoDB)
+		// still get packaged.
+		rawKeys := img.RelatedFiles
+		seen := make(map[string]bool, len(rawKeys))
+		for _, k := range rawKeys {
+			seen[k] = true
+		}
+		for _, k := range discoverRawFilesInS3(img.OriginalFile) {
+			if !seen[k] {
+				fmt.Printf("  Discovered unrecorded RAW: %s\n", k)
+				rawKeys = append(rawKeys, k)
+				seen[k] = true
+			}
+		}
+
 		// Add related files (RAW files) to the zip
-		for _, relFile := range img.RelatedFiles {
+		for _, relFile := range rawKeys {
 			relBaseName := filepath.Base(relFile)
 			relFileName := relBaseName
 			if count, exists := fileNames[relBaseName]; exists {
