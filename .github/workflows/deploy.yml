@@ -94,44 +94,76 @@ jobs:
           {
             "Rules": [
               {
-                "ID": "DeleteAfter90Days",
-                "Filter": {
-                  "Prefix": "deleted/"
-                },
+                "ID": "AbortIncompleteMultipartUploads",
+                "Filter": {},
                 "Status": "Enabled",
-                "Expiration": {
-                  "Days": 90
-                }
+                "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
               },
               {
-                "ID": "DeleteRejectedAfter1Year",
-                "Filter": {
-                  "Prefix": "rejected/"
-                },
+                "ID": "DeleteAfter90Days",
+                "Filter": { "Prefix": "deleted/" },
                 "Status": "Enabled",
-                "Expiration": {
-                  "Days": 365
-                }
+                "Expiration": { "Days": 90 },
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
+              },
+              {
+                "ID": "RejectedTransitionAndExpire",
+                "Filter": { "Prefix": "rejected/" },
+                "Status": "Enabled",
+                "Transitions": [
+                  { "Days": 30, "StorageClass": "STANDARD_IA" }
+                ],
+                "Expiration": { "Days": 365 },
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
               },
               {
                 "ID": "DeleteProjectZipsAfter30Days",
-                "Filter": {
-                  "Prefix": "project-zips/"
-                },
+                "Filter": { "Prefix": "project-zips/" },
                 "Status": "Enabled",
-                "Expiration": {
-                  "Days": 30
-                }
+                "Expiration": { "Days": 30 },
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
               },
               {
                 "ID": "DeleteCorruptedAfter90Days",
+                "Filter": { "Prefix": "corrupted/" },
+                "Status": "Enabled",
+                "Expiration": { "Days": 90 },
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
+              },
+              {
+                "ID": "ApprovedIntelligentTiering",
+                "Filter": { "Prefix": "approved/" },
+                "Status": "Enabled",
+                "Transitions": [
+                  { "Days": 0, "StorageClass": "INTELLIGENT_TIERING" }
+                ],
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+              },
+              {
+                "ID": "ImagesLargeIntelligentTiering",
                 "Filter": {
-                  "Prefix": "corrupted/"
+                  "And": {
+                    "Prefix": "images/",
+                    "ObjectSizeGreaterThan": 5242880
+                  }
                 },
                 "Status": "Enabled",
-                "Expiration": {
-                  "Days": 90
-                }
+                "Transitions": [
+                  { "Days": 0, "StorageClass": "INTELLIGENT_TIERING" }
+                ]
+              },
+              {
+                "ID": "ExpireOldVersionsImages",
+                "Filter": { "Prefix": "images/" },
+                "Status": "Enabled",
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+              },
+              {
+                "ID": "ExpireIncomingOrphans",
+                "Filter": { "Prefix": "incoming/" },
+                "Status": "Enabled",
+                "Expiration": { "Days": 30 },
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
               }
             ]
           }
@@ -142,10 +174,15 @@ jobs:
             --lifecycle-configuration file:///tmp/lifecycle.json
 
           echo "S3 lifecycle policies configured:"
-          echo "  - deleted/ folder: 90-day expiration"
-          echo "  - rejected/ folder: 365-day expiration"
-          echo "  - project-zips/ folder: 30-day expiration"
-          echo "  - corrupted/ folder: 90-day expiration"
+          echo "  - Abort incomplete multipart uploads after 7 days (whole bucket)"
+          echo "  - deleted/  : expire 90d  | noncurrent 7d"
+          echo "  - rejected/ : transition to STANDARD_IA at 30d, expire 365d | noncurrent 30d"
+          echo "  - project-zips/ : expire 30d | noncurrent 7d"
+          echo "  - corrupted/ : expire 90d | noncurrent 7d"
+          echo "  - approved/ : transition to INTELLIGENT_TIERING at 0d | noncurrent 30d"
+          echo "  - images/ (>5MB) : transition to INTELLIGENT_TIERING at 0d (RAWs/originals)"
+          echo "  - images/ : noncurrent 30d (cleanup overwrites/copy+delete)"
+          echo "  - incoming/ : 30d safety expiration | noncurrent 7d"
 
       - name: Build SAM application
         run: |
@@ -160,6 +197,34 @@ jobs:
             echo "Creating SAM deployment bucket: ${BUCKET_NAME}"
             aws s3 mb "s3://${BUCKET_NAME}" --region ${AWS_REGION} || true
           fi
+
+          # Apply lifecycle: expire old SAM artifacts and abort stuck multipart uploads.
+          # Idempotent — safe to run on every deploy.
+          cat > /tmp/sam-lifecycle.json <<'EOF'
+          {
+            "Rules": [
+              {
+                "ID": "AbortIncompleteMultipartUploads",
+                "Filter": {},
+                "Status": "Enabled",
+                "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+              },
+              {
+                "ID": "ExpireSamArtifacts",
+                "Filter": {},
+                "Status": "Enabled",
+                "Expiration": { "Days": 14 },
+                "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
+              }
+            ]
+          }
+          EOF
+
+          aws s3api put-bucket-lifecycle-configuration \
+            --bucket "${BUCKET_NAME}" \
+            --lifecycle-configuration file:///tmp/sam-lifecycle.json || true
+
+          echo "SAM deploy bucket lifecycle: 14-day expiration + 7-day multipart abort"
         continue-on-error: true
 
       - name: Check and fix stuck CloudFormation stack and clean up resources

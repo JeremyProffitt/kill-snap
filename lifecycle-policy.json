@@ -1,64 +1,76 @@
 {
     "Rules": [
         {
-            "ID": "DeleteAfter90Days",
+            "ID": "AbortIncompleteMultipartUploads",
+            "Filter": {},
             "Status": "Enabled",
-            "Filter": {
-                "Prefix": "deleted/"
-            },
-            "Expiration": {
-                "Days": 90
-            }
+            "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
         },
         {
-            "ID": "DeleteRejectedAfter1Year",
+            "ID": "DeleteAfter90Days",
+            "Filter": { "Prefix": "deleted/" },
             "Status": "Enabled",
-            "Filter": {
-                "Prefix": "rejected/"
-            },
-            "Expiration": {
-                "Days": 365
-            }
+            "Expiration": { "Days": 90 },
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
+        },
+        {
+            "ID": "RejectedTransitionAndExpire",
+            "Filter": { "Prefix": "rejected/" },
+            "Status": "Enabled",
+            "Transitions": [
+                { "Days": 30, "StorageClass": "STANDARD_IA" }
+            ],
+            "Expiration": { "Days": 365 },
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
         },
         {
             "ID": "DeleteProjectZipsAfter30Days",
+            "Filter": { "Prefix": "project-zips/" },
             "Status": "Enabled",
-            "Filter": {
-                "Prefix": "project-zips/"
-            },
-            "Expiration": {
-                "Days": 30
-            }
+            "Expiration": { "Days": 30 },
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
         },
         {
             "ID": "DeleteCorruptedAfter90Days",
+            "Filter": { "Prefix": "corrupted/" },
             "Status": "Enabled",
+            "Expiration": { "Days": 90 },
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
+        },
+        {
+            "ID": "ApprovedIntelligentTiering",
+            "Filter": { "Prefix": "approved/" },
+            "Status": "Enabled",
+            "Transitions": [
+                { "Days": 0, "StorageClass": "INTELLIGENT_TIERING" }
+            ],
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+        },
+        {
+            "ID": "ImagesLargeIntelligentTiering",
             "Filter": {
-                "Prefix": "corrupted/"
+                "And": {
+                    "Prefix": "images/",
+                    "ObjectSizeGreaterThan": 5242880
+                }
             },
-            "Expiration": {
-                "Days": 90
-            }
+            "Status": "Enabled",
+            "Transitions": [
+                { "Days": 0, "StorageClass": "INTELLIGENT_TIERING" }
+            ]
         },
         {
             "ID": "ExpireOldVersionsImages",
+            "Filter": { "Prefix": "images/" },
             "Status": "Enabled",
-            "Filter": {
-                "Prefix": "images/"
-            },
-            "NoncurrentVersionExpiration": {
-                "NoncurrentDays": 90
-            }
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
         },
         {
-            "ID": "ExpireOldVersionsProjects",
+            "ID": "ExpireIncomingOrphans",
+            "Filter": { "Prefix": "incoming/" },
             "Status": "Enabled",
-            "Filter": {
-                "Prefix": "projects/"
-            },
-            "NoncurrentVersionExpiration": {
-                "NoncurrentDays": 90
-            }
+            "Expiration": { "Days": 30 },
+            "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
         }
     ]
 }
