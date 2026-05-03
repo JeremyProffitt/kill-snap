@@ -2277,6 +2277,25 @@ func handleUndeleteImage(imageID string, headers map[string]string) (events.APIG
 		return errorResponse(500, "Failed to update metadata", headers)
 	}
 
+	// Re-increment project ImageCount: handleDeleteImage decremented it, so
+	// undelete must put it back. Without this, the stored counter drifts low
+	// permanently (and we no longer reconcile on every list call).
+	if img.ProjectID != "" {
+		_, err = ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+			TableName: aws.String(projectsTable),
+			Key: map[string]*dynamodb.AttributeValue{
+				"ProjectID": {S: aws.String(img.ProjectID)},
+			},
+			UpdateExpression: aws.String("ADD ImageCount :inc"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":inc": {N: aws.String("1")},
+			},
+		})
+		if err != nil {
+			fmt.Printf("Warning: Failed to re-increment project ImageCount: %v\n", err)
+		}
+	}
+
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
 		Headers:    headers,
@@ -2308,14 +2327,6 @@ func handleListProjects(request events.APIGatewayProxyRequest, headers map[strin
 			continue
 		}
 
-		// Calculate actual image count from images table
-		actualCount := getProjectImageCount(p.ProjectID)
-		if actualCount != p.ImageCount {
-			// Update stored count if it differs from actual
-			p.ImageCount = actualCount
-			updateProjectImageCount(p.ProjectID, actualCount)
-		}
-
 		projects = append(projects, p)
 	}
 
@@ -2330,41 +2341,6 @@ func handleListProjects(request events.APIGatewayProxyRequest, headers map[strin
 		Headers:    headers,
 		Body:       string(body),
 	}, nil
-}
-
-// getProjectImageCount counts actual images belonging to a project
-func getProjectImageCount(projectID string) int {
-	result, err := ddbClient.Query(&dynamodb.QueryInput{
-		TableName:              aws.String(imageTable),
-		IndexName:              aws.String("ProjectIndex"),
-		KeyConditionExpression: aws.String("ProjectID = :pid"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":pid": {S: aws.String(projectID)},
-		},
-		Select: aws.String("COUNT"),
-	})
-	if err != nil {
-		fmt.Printf("Error counting project images: %v\n", err)
-		return 0
-	}
-	return int(*result.Count)
-}
-
-// updateProjectImageCount updates the stored ImageCount for a project
-func updateProjectImageCount(projectID string, count int) {
-	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
-		TableName: aws.String(projectsTable),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ProjectID": {S: aws.String(projectID)},
-		},
-		UpdateExpression: aws.String("SET ImageCount = :count"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":count": {N: aws.String(fmt.Sprintf("%d", count))},
-		},
-	})
-	if err != nil {
-		fmt.Printf("Warning: Failed to update ImageCount for project %s: %v\n", projectID, err)
-	}
 }
 
 func handleCreateProject(request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {

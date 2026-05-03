@@ -256,8 +256,6 @@ Resources:
       AttributeDefinitions:
         - AttributeName: ImageGUID
           AttributeType: S
-        - AttributeName: Reviewed
-          AttributeType: S
         - AttributeName: Status
           AttributeType: S
         - AttributeName: ProjectID
@@ -270,14 +268,6 @@ Resources:
         - AttributeName: ImageGUID
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: ReviewedIndex
-          KeySchema:
-            - AttributeName: Reviewed
-              KeyType: HASH
-            - AttributeName: ImageGUID
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
         - IndexName: StatusIndex
           KeySchema:
             - AttributeName: Status
@@ -693,19 +683,21 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/logs
             Method: GET
-        # Keyword backfill for images without AI analysis - runs every 15 minutes
         GetStats:
           Type: Api
           Properties:
             RestApiId: !Ref ImageReviewApi
             Path: /api/stats
             Method: GET
+        # Keyword backfill: disabled. New uploads get AI keywords inline at ingest
+        # (see thumbnail/main.go), so this scheduled scan is only useful for legacy
+        # backlog. Re-enable manually when reprocessing is needed.
         KeywordBackfill:
           Type: Schedule
           Properties:
-            Schedule: rate(15 minutes)
+            Schedule: rate(1 day)
             Description: Backfill keywords for images that don't have AI analysis
-            Enabled: true
+            Enabled: false
             Input: '{"source": "aws.events", "detail-type": "Scheduled Event", "detail": {"action": "backfill-keywords"}}'
 
   # CloudFront Origin Access Control
