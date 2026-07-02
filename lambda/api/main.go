@@ -140,11 +140,12 @@ type Project struct {
 
 // ZipFile represents a generated zip file for a project
 type ZipFile struct {
-	Key        string `json:"key" dynamodbav:"Key"`
-	Size       int64  `json:"size" dynamodbav:"Size"`
-	ImageCount int    `json:"imageCount" dynamodbav:"ImageCount"`
-	CreatedAt  string `json:"createdAt" dynamodbav:"CreatedAt"`
-	Status     string `json:"status" dynamodbav:"Status"` // "generating", "complete", "failed"
+	Key         string `json:"key" dynamodbav:"Key"`
+	Size        int64  `json:"size" dynamodbav:"Size"`
+	ImageCount  int    `json:"imageCount" dynamodbav:"ImageCount"`
+	FailedCount int    `json:"failedCount" dynamodbav:"FailedCount"`
+	CreatedAt   string `json:"createdAt" dynamodbav:"CreatedAt"`
+	Status      string `json:"status" dynamodbav:"Status"` // "generating", "complete", "failed"
 }
 
 type CreateProjectRequest struct {
@@ -1297,6 +1298,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	switch {
 	case path == "/api/stats" && method == "GET":
 		return handleGetStats(headers)
+	case path == "/api/user/settings" && method == "GET":
+		return handleGetUserSettings(token, headers)
+	case path == "/api/user/settings" && method == "PUT":
+		return handlePutUserSettings(token, request, headers)
 	case path == "/api/images" && method == "GET":
 		return handleListImages(request, headers)
 	case strings.HasPrefix(path, "/api/images/") && method == "PUT":
@@ -3253,6 +3258,122 @@ func validateToken(tokenString string) bool {
 	})
 
 	return err == nil && token.Valid
+}
+
+// getUsernameFromToken extracts the username claim from a validated JWT.
+func getUsernameFromToken(tokenString string) (string, bool) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil || !token.Valid {
+		return "", false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", false
+	}
+	username, ok := claims["username"].(string)
+	if !ok || username == "" {
+		return "", false
+	}
+	return username, true
+}
+
+// UserSettings holds per-user UI preferences stored on the Users table row.
+type UserSettings struct {
+	ThemeColor string `json:"themeColor,omitempty"`
+	ThemeStyle string `json:"themeStyle,omitempty"`
+}
+
+func isValidSettingValue(v string) bool {
+	if v == "" || len(v) > 64 {
+		return false
+	}
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func handleGetUserSettings(token string, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	username, ok := getUsernameFromToken(token)
+	if !ok {
+		return errorResponse(401, "Invalid token", headers)
+	}
+
+	result, err := ddbClient.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(usersTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"Username": {S: aws.String(username)},
+		},
+	})
+	if err != nil {
+		fmt.Printf("Failed to get user settings for %s: %v\n", username, err)
+		return errorResponse(500, "Failed to get user settings", headers)
+	}
+	if result.Item == nil {
+		return errorResponse(404, "User not found", headers)
+	}
+
+	var settings UserSettings
+	if attr := result.Item["ThemeColor"]; attr != nil && attr.S != nil {
+		settings.ThemeColor = *attr.S
+	}
+	if attr := result.Item["ThemeStyle"]; attr != nil && attr.S != nil {
+		settings.ThemeStyle = *attr.S
+	}
+
+	body, _ := json.Marshal(settings)
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
+}
+
+func handlePutUserSettings(token string, request events.APIGatewayProxyRequest, headers map[string]string) (events.APIGatewayProxyResponse, error) {
+	username, ok := getUsernameFromToken(token)
+	if !ok {
+		return errorResponse(401, "Invalid token", headers)
+	}
+
+	var settings UserSettings
+	if err := json.Unmarshal([]byte(request.Body), &settings); err != nil {
+		return errorResponse(400, "Invalid request body", headers)
+	}
+	if !isValidSettingValue(settings.ThemeColor) || !isValidSettingValue(settings.ThemeStyle) {
+		return errorResponse(400, "Invalid theme settings", headers)
+	}
+
+	_, err := ddbClient.UpdateItem(&dynamodb.UpdateItemInput{
+		TableName: aws.String(usersTable),
+		Key: map[string]*dynamodb.AttributeValue{
+			"Username": {S: aws.String(username)},
+		},
+		UpdateExpression: aws.String("SET ThemeColor = :color, ThemeStyle = :style"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":color": {S: aws.String(settings.ThemeColor)},
+			":style": {S: aws.String(settings.ThemeStyle)},
+		},
+		// Never upsert a user row that doesn't exist (e.g. token for a deleted user)
+		ConditionExpression: aws.String("attribute_exists(Username)"),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "ConditionalCheckFailed") {
+			return errorResponse(404, "User not found", headers)
+		}
+		fmt.Printf("Failed to save user settings for %s: %v\n", username, err)
+		return errorResponse(500, "Failed to save user settings", headers)
+	}
+
+	body, _ := json.Marshal(map[string]bool{"success": true})
+	return events.APIGatewayProxyResponse{
+		StatusCode: 200,
+		Headers:    headers,
+		Body:       string(body),
+	}, nil
 }
 
 // StatsResponse represents the system health stats

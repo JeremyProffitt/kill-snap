@@ -361,18 +361,18 @@ export const api = {
     );
   },
 
-  async getUserSettings(): Promise<{ themeColor: string; themeStyle: string }> {
+  async getUserSettings(): Promise<{ themeColor?: string; themeStyle?: string } | null> {
     try {
       const response = await withRetry(() =>
-        axios.get<{ themeColor: string; themeStyle: string }>(
+        axios.get<{ themeColor?: string; themeStyle?: string }>(
           `${API_BASE_URL}/api/user/settings`,
           { headers: authService.getAuthHeader() }
         )
       );
       return response.data;
     } catch (error) {
-      // Return defaults if endpoint doesn't exist or fails
-      return { themeColor: 'ocean-blue', themeStyle: 'rounded-modern' };
+      // Null (not defaults) so callers don't clobber local preferences on failure
+      return null;
     }
   },
 

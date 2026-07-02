@@ -477,6 +477,7 @@ Resources:
                 - s3:GetObject
                 - s3:HeadObject
                 - s3:ListBucket
+                - s3:DeleteObject
               Resource:
                 - !Sub 'arn:aws:s3:::${S3BucketName}/*'
                 - !Sub 'arn:aws:s3:::${S3BucketName}'
@@ -484,6 +485,7 @@ Resources:
               Action:
                 - dynamodb:Scan
                 - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
               Resource:
                 - !GetAtt ImageMetadataTable.Arn
       Events:
@@ -697,6 +699,18 @@ Resources:
             RestApiId: !Ref ImageReviewApi
             Path: /api/stats
             Method: GET
+        GetUserSettings:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/user/settings
+            Method: GET
+        PutUserSettings:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ImageReviewApi
+            Path: /api/user/settings
+            Method: PUT
         # Keyword backfill: disabled. New uploads get AI keywords inline at ingest
         # (see thumbnail/main.go), so this scheduled scan is only useful for legacy
         # backlog. Re-enable manually when reprocessing is needed.

@@ -52,11 +52,12 @@ type Project struct {
 
 // ZipFile represents a generated zip file
 type ZipFile struct {
-	Key        string `json:"key" dynamodbav:"Key"`
-	Size       int64  `json:"size" dynamodbav:"Size"`
-	ImageCount int    `json:"imageCount" dynamodbav:"ImageCount"`
-	CreatedAt  string `json:"createdAt" dynamodbav:"CreatedAt"`
-	Status     string `json:"status" dynamodbav:"Status"`
+	Key         string `json:"key" dynamodbav:"Key"`
+	Size        int64  `json:"size" dynamodbav:"Size"`
+	ImageCount  int    `json:"imageCount" dynamodbav:"ImageCount"`
+	FailedCount int    `json:"failedCount" dynamodbav:"FailedCount"`
+	CreatedAt   string `json:"createdAt" dynamodbav:"CreatedAt"`
+	Status      string `json:"status" dynamodbav:"Status"`
 }
 
 // ImageRecord represents an image in DynamoDB
@@ -171,11 +172,12 @@ func handleRequest(ctx context.Context, request ZipRequest) error {
 			fmt.Printf("Error creating zip %s: %v\n", zipKey, err)
 			// Record failed zip
 			zipFiles = append(zipFiles, ZipFile{
-				Key:        zipKey,
-				Size:       0,
-				ImageCount: len(batch),
-				CreatedAt:  time.Now().Format(time.RFC3339),
-				Status:     "failed",
+				Key:         zipKey,
+				Size:        0,
+				ImageCount:  len(batch),
+				FailedCount: len(batch),
+				CreatedAt:   time.Now().Format(time.RFC3339),
+				Status:      "failed",
 			})
 			continue
 		}
@@ -772,18 +774,19 @@ func createAndUploadZip(ctx context.Context, images []ImageRecord, zipKey string
 	fmt.Printf("SUCCESS: Zip uploaded to S3: %s\n", zipKey)
 
 	return &ZipFile{
-		Key:        zipKey,
-		Size:       stat.Size(),
-		ImageCount: successCount,
-		CreatedAt:  time.Now().Format(time.RFC3339),
-		Status:     "complete",
+		Key:         zipKey,
+		Size:        stat.Size(),
+		ImageCount:  successCount,
+		FailedCount: failCount,
+		CreatedAt:   time.Now().Format(time.RFC3339),
+		Status:      "complete",
 	}, nil
 }
 
 func updateProjectZipFiles(projectID string, zipFiles []ZipFile) error {
 	fmt.Printf("Updating project %s with %d zip file(s)...\n", projectID, len(zipFiles))
 	for i, zf := range zipFiles {
-		fmt.Printf("  [%d] Key=%s, Size=%d, ImageCount=%d, Status=%s\n", i+1, zf.Key, zf.Size, zf.ImageCount, zf.Status)
+		fmt.Printf("  [%d] Key=%s, Size=%d, ImageCount=%d, FailedCount=%d, Status=%s\n", i+1, zf.Key, zf.Size, zf.ImageCount, zf.FailedCount, zf.Status)
 	}
 
 	// Marshal zip files to DynamoDB format

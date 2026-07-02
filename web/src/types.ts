@@ -57,6 +57,7 @@ export interface ZipFile {
   key: string;
   size: number;
   imageCount: number;
+  failedCount?: number;
   createdAt: string;
   status: 'generating' | 'complete' | 'failed';
 }

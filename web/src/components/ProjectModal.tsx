@@ -397,6 +397,15 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     </button>
                     <span className="zip-file-meta">
                       {formatFileSize(zipFile.size)}, {zipFile.imageCount} images
+                      {(zipFile.failedCount ?? 0) > 0 && (
+                        <span
+                          className="zip-file-missing-warning"
+                          style={{ color: '#d9534f', fontWeight: 600 }}
+                          title="Some images could not be included in this zip because their files are missing from storage. Check the zip generator logs for details."
+                        >
+                          {' '}({zipFile.failedCount} missing)
+                        </span>
+                      )}
                     </span>
                   </div>
                   <button

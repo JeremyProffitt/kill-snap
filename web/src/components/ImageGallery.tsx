@@ -230,6 +230,23 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
     setPreferences(prev => ({ ...prev, themeColor: colorId, themeStyle: styleId }));
   }, []);
 
+  // Load per-user settings from the server once after login so the theme
+  // follows the user across devices; local preferences win until it responds
+  useEffect(() => {
+    api.getUserSettings().then(settings => {
+      if (!settings || (!settings.themeColor && !settings.themeStyle)) return;
+      setPreferences(prev => {
+        const next = {
+          ...prev,
+          themeColor: settings.themeColor || prev.themeColor,
+          themeStyle: settings.themeStyle || prev.themeStyle,
+        };
+        savePreferences({ themeColor: next.themeColor, themeStyle: next.themeStyle });
+        return next;
+      });
+    });
+  }, []);
+
   // Save scroll position before unload
   useEffect(() => {
     const handleBeforeUnload = () => saveScrollPosition();
@@ -1337,7 +1354,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
               {selectedProject ? 'Project' : selectedDate ? 'Date' : 'Unreviewed'}
             </span>
             <span className="image-count-number">
-              {filteredImages.length}
+              {loading ? '…' : filteredImages.length}
             </span>
           </div>
 
@@ -1465,11 +1482,11 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({ onLogout }) => {
                       onChange={(e) => setStateFilter(e.target.value as StateFilter)}
                       className="sidebar-select"
                     >
-                      <option value="unreviewed">Unreviewed ({imageCounts.unreviewed})</option>
-                      <option value="approved">Approved ({imageCounts.approved})</option>
-                      <option value="rejected">Rejected ({imageCounts.rejected})</option>
-                      <option value="deleted">Deleted ({imageCounts.deleted})</option>
-                      <option value="all">All ({imageCounts.all})</option>
+                      <option value="unreviewed">Unreviewed ({loading ? '…' : imageCounts.unreviewed})</option>
+                      <option value="approved">Approved ({loading ? '…' : imageCounts.approved})</option>
+                      <option value="rejected">Rejected ({loading ? '…' : imageCounts.rejected})</option>
+                      <option value="deleted">Deleted ({loading ? '…' : imageCounts.deleted})</option>
+                      <option value="all">All ({loading ? '…' : imageCounts.all})</option>
                     </select>
                   </div>
 
