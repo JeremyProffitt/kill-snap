@@ -1,0 +1,37 @@
+name: Runner Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tiny310:
+    name: Validate Tiny310 runner
+    runs-on: [self-hosted, home, tiny310, kill-snap]
+    timeout-minutes: 10
+    steps:
+      - name: Runner identity
+        run: |
+          set -euxo pipefail
+          hostname
+          uname -a
+          id
+          pwd
+          df -h /
+          free -h
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Tool smoke test
+        run: |
+          set -euxo pipefail
+          git --version
+          node --version || true
+          npm --version || true
+          docker --version || true
+          curl --version | head -1
+      - name: Build metadata
+        run: |
+          set -euxo pipefail
+          find . -maxdepth 3 -type f \( -name go.mod -o -name package.json -o -name template.yaml \) | sort
