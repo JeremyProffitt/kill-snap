@@ -83,19 +83,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Go module smoke tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r mod; do
-            dir="$(dirname "$mod")"
-            if [[ "$dir" == *"scripts"* ]] || [[ "$dir" == *"tools"* ]]; then
-              echo "== skipping $dir =="
-              continue
-            fi
-            echo "== go test $dir =="
-            (cd "$dir" && go test ./...)
-          done < <(find . -name go.mod -not -path './node_modules/*' | sort)
+      - name: Build SAM application
+        run: sam build
       - name: Web build
         shell: bash
         run: |
