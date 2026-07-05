@@ -1,8 +1,9 @@
 import { test, expect, Page } from '@playwright/test';
 
 const BASE_URL = 'https://kill-snap.jeremy.ninja';
-const USERNAME = 'Jeremy';
-const PASSWORD = 'KillSnap4President!';
+const USERNAME = process.env.E2E_USERNAME ?? '';
+const PASSWORD = process.env.E2E_PASSWORD ?? '';
+const CREDENTIALS_MISSING = !USERNAME || !PASSWORD;
 
 let authToken = '';
 
@@ -60,6 +61,7 @@ async function apiCall(page: Page, method: string, path: string, body?: any) {
 }
 
 test.describe('Kill-Snap E2E Tests', () => {
+  test.skip(CREDENTIALS_MISSING, 'Skipping E2E suite: set E2E_USERNAME and E2E_PASSWORD env vars to run these tests.');
   test.setTimeout(180000);
 
   test('1. Login and inventory current state', async ({ page }) => {
